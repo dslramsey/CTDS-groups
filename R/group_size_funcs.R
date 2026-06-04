@@ -20,8 +20,8 @@ generate_closest_dist<- function(entries, grp_size, w) {
   d<- sapply(counts, function(x) get_closest_dist(n=x, w = w))
   return(d)
 }
-##-------------------------------------------------------------
-get_detections<- function(n, gr, w, closest=TRUE, theta_max=40,
+##--------------------------------------
+get_detections<- function(n, gr, w, closest=TRUE, theta_max=40, any=FALSE,
                           clustered=FALSE, ...) {
   # Could just simulate d directly but for completeness...
   Pi <- base::pi
@@ -31,12 +31,21 @@ get_detections<- function(n, gr, w, closest=TRUE, theta_max=40,
   else
     pts<- dunif_sector(n, w, theta_max)
   r<- sort(pts$r)
-  p<- gr(r[1], ...)
-  detected<- rbinom(1, 1, p)
-  if(detected == 1) {
-    if(closest) return(r[1])
-    else return(r)
-  } else return(0)
+  if(any) {
+    p<- gr(r, ...)
+    detected<- rbinom(n, 1, p)
+    if(any(detected == 1)) {
+      if(closest) return(r[1])
+      else return(r)
+    } else return(0)
+  } else {
+    p<- gr(r[1], ...)
+    detected<- rbinom(1, 1, p)
+    if(detected == 1) {
+      if(closest) return(r[1])
+      else return(r)
+    } else return(0)
+  }
 }
 ##----------------------------------------
 dunif_sector <- function(n, w, theta_max) {
@@ -112,35 +121,74 @@ bin_matrix <- function(data, dist_col, breaks,
   return(mat)
 }
 ##------------------------------------------------------------------------
-generate_detections <- function(entries_per_group, gr, w, closest = TRUE,
-                                binned = FALSE, breaks = NULL, clustered=FALSE, ...) {
+generate_detections_r <- function(entries_per_group, gr, w, closest = TRUE, any=FALSE,
+                                clustered=FALSE, ...) {
+  # used when clustered=TRUE (C++ only handles uniform case)
   # Generation of detection data given a detection function gr(),  returns either the
-  # closest distance of a group (closest=TRUE) or all distances. Detection is conditional
-  # on the closest distance only. Handles continuous and binned distances
-
-  if (binned && is.null(breaks)) stop("binning requested but no breaks supplied")
+  # closest distance of a group (closest=TRUE) or all distances. Detection can be conditional on the
+  # closest distance only (any=FALSE) or any of the distances in the group (any=TRUE)
+  # Handles continuous and binned distances
   G <- length(entries_per_group)
-  grp_size<- seq_len(G)
   out <- vector("list", G)
   for (g in seq_len(G)) {
     # per-entry chunks (accumulate per entry)
-      e_chunks <- vector("list", entries_per_group[g])
-      d_chunks <- vector("list", entries_per_group[g])
-      for (j in seq_len(entries_per_group[g])) {
-        v <- get_detections(g, gr, w, ..., closest = closest, clustered = clustered)
-        v <- v[v > 0]
-        if (length(v) == 0L) next
-        e_chunks[[j]] <- rep.int(j, length(v))
-        d_chunks[[j]] <- as.numeric(v)
-      }
+    e_chunks <- vector("list", entries_per_group[g])
+    d_chunks <- vector("list", entries_per_group[g])
+    for (j in seq_len(entries_per_group[g])) {
+      v <- get_detections(g, gr, w, ..., closest = closest, any=any, clustered = clustered)
+      v <- v[v > 0]
+      if (length(v) == 0L) next
+      e_chunks[[j]] <- rep.int(j, length(v))
+      d_chunks[[j]] <- as.numeric(v)
+    }
     entry <- unlist(e_chunks, use.names = FALSE)
     distance <- unlist(d_chunks, use.names = FALSE)
     if(is.null(entry) | is.null(distance)) next
     df <- data.frame(entry = entry, group = g, distance = distance)
-    if(binned) {
-      df <- bin_matrix(df, "distance", breaks = breaks)
-    }
     out[[g]] <- df
+  }
+  out
+}
+
+##------------------------------------------------------------------------
+generate_detections <- function(entries_per_group, gr, w, closest = TRUE,
+                                binned = FALSE, breaks = NULL,
+                                clustered = FALSE, any = FALSE, ...) {
+  # Generation of detection data given a detection function gr().
+  #
+  # Detection modes:
+  #   any=FALSE (default): group detected if the closest individual detected through gr();
+  #                        return closest distance (closest=TRUE) or all distances.
+  #   any=TRUE           : each individual detected independently using gr(r_k);
+  #                        return closest detected distance (closest=TRUE) or all
+  #                        distances.
+  #
+  # Uses a fast C++ backend for the non-clustered case; falls back to pure R
+  # when clustered=TRUE.
+
+  if (binned && is.null(breaks)) stop("binning requested but no breaks supplied")
+
+  if (clustered) {
+    out<- generate_detections_r(entries_per_group, gr, w, closest,
+                                  any, clustered, ...)
+  } else {
+  # single-argument closure so C++ only sees gr(r)
+    gr_fn <- function(x) gr(x, ...)
+
+    out <- generate_detections_cpp(
+      entries_per_group = as.integer(entries_per_group),
+      gr      = gr_fn,
+      w       = w,
+      closest = closest,
+      any     = any
+    )
+}
+  if (binned) {
+    for (g in seq_along(out)) {
+      if (!is.null(out[[g]])) {
+        out[[g]] <- bin_matrix(out[[g]], "distance", breaks = breaks)
+      }
+    }
   }
   out
 }

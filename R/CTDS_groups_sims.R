@@ -1,10 +1,13 @@
 
 # Accounting for multiple individuals in a camera FOV by
 # determining the availability of the closest individual
+# using order statistics
 
 library(tidyverse)
 library(tidyr)
+library(Rcpp)
 
+sourceCpp("src/generate_detections.cpp")
 source("R/group_size_funcs.r")
 
 
@@ -47,81 +50,16 @@ ggsave(filename = "outputs/group_size_PDF.png",
        width = 10, height = 10, units = "in")
 
 
-##---- Bias when using all distances conditional on closest detection ----
-
-sigma<- 4
-w<- 12
-grp_size<- 1:10
-entries<- 1e5
-clustered<- FALSE  # distribution within [0, w]; uniform or clustered
-
-entries_per_grp<- rep(entries, length(grp_size))
-
-y<- generate_detections(entries_per_grp, g=hn_func,
-                        sigma=sigma,
-                        w=w, closest=FALSE,
-                        clustered=clustered)
-
-ngrp<- length(y)
-
-##  Do adjusted availability
-
-sigma_mle<- matrix(NA, ngrp, 2)
-
-for(i in 1:ngrp) {
-  cat("doing group, ",i,"\n")
-  mle <- optim(
-    par = 1,
-    fn = nll.cond.point.hn,
-    x = y[[i]]$distance,
-    gs = 1,
-    w=w,
-    method = "Brent",
-    lower = -5,
-    upper = 5,
-    hessian = TRUE
-  )
-
-  H<- mle$hessian
-  sigma_mle[i,1]<- exp(mle$par)
-  sigma_mle[i,2]<- exp(mle$par) * sqrt(solve(H))
-}
-
-colnames(sigma_mle)<- c("Est","SE")
-sigma_est<- as_tibble(sigma_mle)  %>%
-  mutate(Est = (Est - sigma)/sigma,
-         SE = SE/sigma,
-         Model = "All distances",
-         group = grp_size)
-
-win.graph(10,5)
-sigma_est%>%
-  ggplot(aes(group, Est, color=Model)) +
-  geom_pointrange(aes(ymin = Est - 2*SE, ymax=Est + 2*SE),
-                  position=position_dodge(width=0.2), size=1,linewidth = 1) +
-  geom_hline(yintercept = 0) +
-  scale_x_continuous(breaks = grp_size,labels = grp_size) +
-  labs(x = "Group size", y = "Relative bias") +
-  theme_bw() +
-  theme(axis.title.x = element_text(face="bold", size=15),
-        axis.title.y = element_text(face="bold", size=15),
-        axis.text = element_text(size=12),
-        legend.title = element_text(face="bold"))
-
-
-ggsave(filename = "outputs/LL_all_distance.png",
-       width = 10, height = 5, units = "in")
-
-
 ##---- Conditional likelihood for continuous distance sampling data ----
+##---- Bias when using all distances vs closest distance
 
-sigma<- c(2,3,4)
+sigma<- c(3,4,5)
 w<- 12
 grp_size<- 1:10
 gr<- hn_func
-entries<- 1e5
+entries<- 1e6
 clustered = FALSE
-
+any = FALSE
 
 entries_per_grp<- rep(entries, length(grp_size))
 
@@ -129,97 +67,103 @@ res<- vector("list", length(sigma))
 
 for(j in seq_along(sigma)) {
 
-y<- generate_detections(entries_per_grp, gr=gr,
-                        sigma=sigma[j],
-                        w=w, closest=TRUE,
-                        clustered = clustered)
+  cat("doing sigma, ",sigma[j],"\n")
+  y<- generate_detections(entries_per_grp, gr=gr,
+                          sigma=sigma[j],
+                          w=w, closest=TRUE,
+                          clustered = clustered,
+                          any=any)
 
-ngrp<- length(y)
+  ngrp<- length(y)
 
-##  Do adjusted availability
+  ##  Closest distance and adjusted availability
 
-sigma_mle<- matrix(NA, ngrp, 2)
+  sigma_mle<- matrix(NA, ngrp, 2)
 
-for(i in 1:ngrp) {
-  cat("doing group, ",i,"\n")
-  mle <- optim(
-    par = 1,
-    fn = nll.cond.point.hn,
-    x = y[[i]]$distance,
-    gs = grp_size[i],
-    w=w,
-    method="Brent",
-    lower = -5,
-    upper = 5,
-    hessian = TRUE
-  )
-  H<- mle$hessian
-  sigma_mle[i,1]<- exp(mle$par)
-  sigma_mle[i,2]<- exp(mle$par) * sqrt(solve(H))
-}
+  for(i in 1:ngrp) {
+    mle <- optim(
+      par = 1,
+      fn = nll.cond.point.hn,
+      x = y[[i]]$distance,
+      gs = grp_size[i],
+      w=w,
+      method="Brent",
+      lower = -5,
+      upper = 5,
+      hessian = TRUE
+    )
+    H<- mle$hessian
+    sigma_mle[i,1]<- exp(mle$par)
+    sigma_mle[i,2]<- exp(mle$par) * sqrt(solve(H))
+  }
 
-colnames(sigma_mle)<- c("Est","SE")
-sigma_adj<- as_tibble(sigma_mle) %>%
-  mutate(Model = "Adjusted",
-         group = grp_size)
+  colnames(sigma_mle)<- c("Est","SE")
+  sigma_adj<- as_tibble(sigma_mle) %>%
+    mutate(Model = "Closest distance",
+           group = grp_size)
 
 
-## Now unadjusted i.e gs==1
+  ## All distances and standard availability (i.e. gs=1)
 
-sigma_mle<- matrix(NA, ngrp, 2)
+  y<- generate_detections(entries_per_grp, gr=gr,
+                          sigma=sigma[j],
+                          w=w, closest=FALSE,
+                          clustered = clustered,
+                          any = any)
 
-for(i in 1:ngrp) {
-  cat("doing group, ",i,"\n")
-  mle <- optim(
-    par = 1,
-    fn = nll.cond.point.hn,
-    x = y[[i]]$distance,
-    gs = 1,
-    w=w,
-    method = "Brent",
-    lower= -5,
-    upper = 5,
-    hessian = TRUE
-  )
+  sigma_mle<- matrix(NA, ngrp, 2)
 
-  H<- mle$hessian
-  sigma_mle[i,1]<- exp(mle$par)
-  sigma_mle[i,2]<- exp(mle$par) * sqrt(solve(H))
-}
+  for(i in 1:ngrp) {
+    mle <- optim(
+      par = 1,
+      fn = nll.cond.point.hn,
+      x = y[[i]]$distance,
+      gs = 1,
+      w=w,
+      method = "Brent",
+      lower= -5,
+      upper = 5,
+      hessian = TRUE
+    )
 
-colnames(sigma_mle)<- c("Est","SE")
-sigma_unadj<- as_tibble(sigma_mle) %>%
-  mutate(Model = "Unadjusted",
-         group = grp_size)
+    H<- mle$hessian
+    sigma_mle[i,1]<- exp(mle$par)
+    sigma_mle[i,2]<- exp(mle$par) * sqrt(solve(H))
+  }
 
-sigma_est<- bind_rows(sigma_adj,sigma_unadj)
-sigma_est<- sigma_est %>% mutate(Est = (Est - sigma[j])/sigma[j],
-                                 SE = SE/sigma[j],
-                                 sigma=sigma[j])
-res[[j]]<- sigma_est
+  colnames(sigma_mle)<- c("Est","SE")
+  sigma_unadj<- as_tibble(sigma_mle) %>%
+    mutate(Model = "All distances",
+           group = grp_size)
+
+  sigma_est<- bind_rows(sigma_adj,sigma_unadj)
+  sigma_est<- sigma_est %>% mutate(Est = (Est - sigma[j])/sigma[j],
+                                   SE = SE/sigma[j],
+                                   sigma=sigma[j])
+  res[[j]]<- sigma_est
 
 }
 
 res<- list_rbind(res)
-res<- res %>% mutate(sigma = paste("Sigma = ",sigma))
-
+res_all<- res %>% mutate(sigma = paste("\u03C3 =",sigma))
 
 win.graph(10,5)
-res %>%
+res_all %>%
   ggplot(aes(group, Est, color=Model)) +
   geom_pointrange(aes(ymin = Est - 2*SE, ymax=Est + 2*SE),
                   position=position_dodge(width=0.2), size=0.7, linewidth = 1) +
   geom_hline(yintercept = 0) +
   facet_wrap(~ sigma) +
   scale_x_continuous(breaks = grp_size,labels = grp_size) +
-  scale_y_continuous(breaks = seq(-0.5, 0.5, 0.1),limits=c(-0.5,0.5)) +
+  scale_y_continuous(breaks = seq(-0.5, 5, 0.5),limits=c(-0.5,5)) +
   labs(x = "Group size", y = "Relative bias") +
   theme_bw() +
   theme(axis.title.x = element_text(face="bold", size=15),
         axis.title.y = element_text(face="bold", size=15),
         axis.text = element_text(size=12),
         strip.text = element_text(face="bold", size=12),
-        legend.title = element_text(face="bold"))
+        legend.title = element_text(face="bold"),
+        legend.position = "bottom")
 
 ggsave(filename = "outputs/LL_cont.png",
        width = 10, height = 5, units = "in")
@@ -233,13 +177,17 @@ dpars<- expand.grid(sigma=sigma,delta=delta)
 w<- 12
 grp_size<- 1:10
 clustered<- FALSE
+any<- FALSE
+
 gr<- hn_func
-entries<- 1e4
+entries<- 1e6
 entries_per_grp<- rep(entries, length(grp_size))
 
 res<- vector("list", nrow(dpars))
 
 for(j in 1:nrow(dpars)) {
+  cat(sprintf("\rParameter %d/%d   ", j, nrow(dpars)))
+  flush.console()
 
 bin_bp <- seq(0, w, by = dpars$delta[j])  # bin breakpoints
 sigma_true<- dpars$sigma[j]
@@ -248,7 +196,8 @@ y<- generate_detections(entries_per_grp, gr=gr,
                         sigma=sigma_true,
                         w=w, closest=TRUE,
                         binned=TRUE, breaks=bin_bp,
-                        clustered=clustered)
+                        clustered=clustered,
+                        any=any)
 
 ngrp<- length(y)
 
@@ -257,7 +206,6 @@ ngrp<- length(y)
 sigma_mle<- matrix(NA, ngrp, 2)
 
 for(i in 1:ngrp) {
-  cat("doing group, ",i,"\n")
   mle <- optim(
     par = 1,
     fn = nll.cond.binned.hn,
@@ -277,15 +225,21 @@ for(i in 1:ngrp) {
 
 colnames(sigma_mle)<- c("Est","SE")
 sigma_adj<- as_tibble(sigma_mle) %>%
-  mutate(Model = "Adjusted",
+  mutate(Model = "Closest distance",
          group = grp_size)
 
 ## Now unadjusted i.e. gs==1
 
+y<- generate_detections(entries_per_grp, gr=gr,
+                        sigma=sigma_true,
+                        w=w, closest=FALSE,
+                        binned=TRUE, breaks=bin_bp,
+                        clustered=clustered,
+                        any=any)
+
 sigma_mle<- matrix(NA, ngrp, 2)
 
 for(i in 1:ngrp) {
-  cat("doing group, ",i,"\n")
   mle <- optim(
     par = 1,
     fn = nll.cond.binned.hn,
@@ -304,7 +258,7 @@ for(i in 1:ngrp) {
 
 colnames(sigma_mle)<- c("Est","SE")
 sigma_unadj<- as_tibble(sigma_mle) %>%
-  mutate(Model = "Unadjusted",
+  mutate(Model = "All distances",
          group = grp_size)
 
 
@@ -317,9 +271,9 @@ res[[j]]<- sigma_est
 }
 
 res<- list_rbind(res)
-res<- res %>% mutate(sigma = paste("Sigma = ",sigma))
+res<- res %>% mutate(sigma = paste("\u03C3 =",sigma))
 
-win.graph(10,8)
+win.graph(10,7)
 res %>% mutate(delta = factor(delta)) %>%
   ggplot(aes(group, Est, color=delta)) +
   geom_pointrange(aes(ymin = Est - 2*SE, ymax=Est + 2*SE),
@@ -327,7 +281,7 @@ res %>% mutate(delta = factor(delta)) %>%
   geom_hline(yintercept = 0) +
   facet_grid(Model ~ sigma) +
   scale_x_continuous(breaks = grp_size,labels = grp_size) +
-  scale_y_continuous(breaks = round(seq(-0.6, 0.2, 0.1),2),limits=c(-0.6, 0.2)) +
+  scale_y_continuous(breaks = round(seq(-0.5, 5, 0.5),2),limits=c(-0.5, 5)) +
   labs(x = "Group size", y = "Relative bias", color="Bin width (m)") +
   theme_bw() +
   theme(axis.title.x = element_text(face="bold", size=15),
@@ -338,25 +292,28 @@ res %>% mutate(delta = factor(delta)) %>%
         legend.position = "bottom")
 
 ggsave(filename = "outputs/LL_bins.png",
-       width = 10, height = 5, units = "in")
+       width = 10, height = 7, units = "in")
 
 
 ##---- Sims for variable group size frequencies ----
 
-
 sigma<- c(3,4,5)
-delta<- c(0.5,1,2,3)
-dpars<- expand.grid(sigma=sigma,delta=delta)
-npars<- nrow(dpars)
+delta<- 2
 w<- 12
 entries<- 2e3
 nsims<- 500
 gr<- hn_func
-clustered<- FALSE
+clustered<- c(FALSE,TRUE)
+any<- c(FALSE,TRUE)
+
+dpars<- expand.grid(sigma=sigma, clustered = clustered, any=any)
+npars<- nrow(dpars)
 
 grp_freq<- list("Asocial" = c(0.97,0.02,0.01),
                 "Fallow deer" = c(0.55,0.3,0.12,0.02,0.01),
                 "Feral pig" = c(0.5,0.20,0.15,0.05,0.05,0.025,0.025))
+
+bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 
 freq_list<- vector("list", length(grp_freq))
 
@@ -367,23 +324,22 @@ for(g in seq_along(grp_freq)) {
   res<- vector("list", nsims)
 
   for(i in 1:nsims) {
-    cat("doing sim ",i," of ",nsims,"\n")
+    cat(sprintf("\rGroup %d/%d  |  Sim %d/%d   ", g, length(grp_freq), i, nsims))
+    flush.console()
 
     ## Using closest distance and  adjusted availability
 
-    sigma_mle<- matrix(NA, npars, 4)
+    sigma_mle<- matrix(NA, npars, 5)
     grp_size<- seq_along(entries_per_group)
 
     for(j in 1:npars) {
-
-      bin_bp <- seq(0, w, by = dpars$delta[j])  # bin breakpoints
 
       y<- generate_detections(entries_per_group, gr=gr,
                               sigma=dpars$sigma[j],
                               w=w, closest=TRUE,
                               binned=TRUE, breaks=bin_bp,
-                              clustered=clustered)
-
+                              any=dpars$any[j],
+                              clustered=dpars$clustered[j])
 
       mle <- optim(
         par = 1,
@@ -401,29 +357,28 @@ for(g in seq_along(grp_freq)) {
       sigma_mle[j,1]<- exp(mle$par)
       sigma_mle[j,2]<- exp(mle$par) * sqrt(solve(H))
       sigma_mle[j,3]<- dpars$sigma[j]
-      sigma_mle[j,4]<- dpars$delta[j]
+      sigma_mle[j,4]<- as.numeric(dpars$clustered[j])
+      sigma_mle[j,5]<- as.numeric(dpars$any[j])
 
     }
-    colnames(sigma_mle)<- c("Est","SE","sigma","delta")
+    colnames(sigma_mle)<- c("Est","SE","sigma","clustered","any")
     sigma_adj<- as_tibble(sigma_mle) %>%
-      mutate(Model = "Adjusted")
-
+      mutate(Model = "Closest distance")
 
 
     ## using all distances and standard availability i.e., gs==1
 
-    sigma_mle<- matrix(NA, npars, 4)
+    sigma_mle<- matrix(NA, npars, 5)
     grp_size<- rep(1, length(entries_per_group))
 
     for(j in 1:npars) {
-
-      bin_bp <- seq(0, w, by = dpars$delta[j])  # bin breakpoints
 
       y<- generate_detections(entries_per_group, g=gr,
                               sigma=dpars$sigma[j],
                               w=w, closest=FALSE,
                               binned=TRUE, breaks=bin_bp,
-                              clustered=clustered)
+                              any=dpars$any[j],
+                              clustered=dpars$clustered[j])
 
       mle <- optim(
         par = 1,
@@ -441,12 +396,13 @@ for(g in seq_along(grp_freq)) {
       sigma_mle[j,1]<- exp(mle$par)
       sigma_mle[j,2]<- exp(mle$par) * sqrt(solve(H))
       sigma_mle[j,3]<- dpars$sigma[j]
-      sigma_mle[j,4]<- dpars$delta[j]
+      sigma_mle[j,4]<- as.numeric(dpars$clustered[j])
+      sigma_mle[j,5]<- as.numeric(dpars$any[j])
 
     }
-    colnames(sigma_mle)<- c("Est","SE","sigma","delta")
+    colnames(sigma_mle)<- c("Est","SE","sigma","clustered","any")
     sigma_unadj<- as_tibble(sigma_mle) %>%
-      mutate(Model = "Unadjusted")
+      mutate(Model = "All distances")
 
     sigma_est<- bind_rows(sigma_adj,sigma_unadj)
     sigma_est<- sigma_est %>% mutate(Est = (Est - sigma)/sigma,
@@ -464,19 +420,25 @@ for(g in seq_along(grp_freq)) {
 
 freq_res<- list_rbind(freq_list)
 
-saveRDS(freq_res, "outputs/freq_closest_uniform.rds")
+saveRDS(freq_res, "outputs/freq_distribtion.rds")
 
-win.graph(10,10)
-freq_res %>% mutate(delta=factor(delta),
-                    sigma = paste("Sigma = ",sigma)) %>%
-  ggplot(aes(Model, Est, fill=delta)) +
+# Plot of distribution effects
+#freq_res<- readRDS("outputs/freq_distribtion.rds")
+
+win.graph(12,5)
+freq_res %>% mutate(sigma = paste("\u03C3 =",sigma),
+                    Model = factor(Model, levels = c("Closest distance","All distances")),
+                    clustered = factor(clustered, labels=c("uniform","clustered")),
+                    any = factor(any, labels = c("closest only","any encounter"))) %>%
+  filter(clustered == "uniform" & any == "closest only") %>%
+  ggplot(aes(Group, Est, fill = Model)) +
   geom_violin(trim=TRUE) +
-  stat_summary(aes(fill=delta),position=position_dodge(width=0.9),fun = median,
+  stat_summary(aes(fill=Model),position=position_dodge(width=0.9),fun = median,
                geom = "point", size=2) +
   geom_hline(yintercept = 0,linetype=2,color="red") +
-  facet_grid(Group ~ sigma) +
-  scale_y_continuous(breaks = seq(-0.5, 2, 0.2), limits=c(-0.5,2)) +
-  labs(x = "Model", y = "Relative bias",fill="Bin width (m)") +
+  facet_wrap(~sigma) +
+  scale_y_continuous(breaks = seq(-0.2, 1.8, 0.2), limits=c(-0.2, 1.8)) +
+  labs(x = "Species", y = "Relative bias") +
   theme_bw() +
   theme(axis.title.x = element_text(face="bold", size=15),
         axis.title.y = element_text(face="bold", size=15),
@@ -486,6 +448,4 @@ freq_res %>% mutate(delta=factor(delta),
         legend.position = "bottom")
 
 ggsave(filename = "outputs/freq_closest_uniform.png",
-       width = 10, height = 5, units = "in")
-
-
+       width = 12, height = 5, units = "in")

@@ -46,6 +46,9 @@ distance sampling (CTDS) applications *Methods in Ecology and Evolution*
   a detected group in CTDS snapshot moments.
 - `r/group_size_functions.r` contains various functions required by the
   main script.
+- `src/generate_detection.cpp` Rcpp source code used for generating
+  grouped distances and detections. Called by `generate_detections` R
+  function.
 
 ## Prerequisites
 
