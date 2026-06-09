@@ -22,7 +22,9 @@ generate_closest_dist<- function(entries, grp_size, w) {
 }
 ##--------------------------------------
 get_detections<- function(n, gr, w, closest=TRUE, ...) {
-  # Could just simulate d directly but for completeness...
+  # Assume closest individual to camera (r[1]) triggers detection
+  # gr is half-normal with scale parameter sigma
+  # return either closest detection only or all distances, given detection
   r<- sort(dunif_circle(n, w))
   p<- gr(r[1], ...)
     detected<- rbinom(1, 1, p)
@@ -57,6 +59,7 @@ generate_detections_r <- function(entries_per_group, gr, w, closest = TRUE,
   # Generation of detection data given a detection function gr(),
   # returns either the closest distance of a group (closest=TRUE) or all distances.
   # Handles continuous and binned distances
+  # r function (see cpp function for actual sims)
   if (binned && is.null(breaks)) stop("binning requested but no breaks supplied")
 
   G <- length(entries_per_group)
@@ -92,7 +95,7 @@ generate_detections_r <- function(entries_per_group, gr, w, closest = TRUE,
 generate_detections <- function(entries_per_group, gr, w, closest = TRUE,
                                 binned = FALSE, breaks = NULL, ...) {
   # Generation of detection data given a detection function gr().
-  # Uses a fast C++ backend .
+  # Uses a fast C++ implementation of generate_detections_r
 
   if (binned && is.null(breaks)) stop("binning requested but no breaks supplied")
 
