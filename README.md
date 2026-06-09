@@ -5,11 +5,7 @@ applications
 
 ## Overview
 
-This repository contains code from:
-
-Ramsey, D.S.L., and Cally, J.G. (2026). A new method to account for the
-detection of multiple individuals in camera traps for use in camera trap
-distance sampling (CTDS) applications *Methods in Ecology and Evolution*
+This repository contains code for peer review only:
 
 - Camera trap distance sampling (CTDS) is popular recent method used to
   estimate wildlife abundance from camera trap images that uses the

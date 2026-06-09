@@ -58,8 +58,6 @@ w<- 12
 grp_size<- 1:10
 gr<- hn_func
 entries<- 1e6
-clustered = FALSE
-any = FALSE
 
 entries_per_grp<- rep(entries, length(grp_size))
 
@@ -70,9 +68,8 @@ for(j in seq_along(sigma)) {
   cat("doing sigma, ",sigma[j],"\n")
   y<- generate_detections(entries_per_grp, gr=gr,
                           sigma=sigma[j],
-                          w=w, closest=TRUE,
-                          clustered = clustered,
-                          any=any)
+                          w=w, closest=TRUE)
+
 
   ngrp<- length(y)
 
@@ -107,9 +104,8 @@ for(j in seq_along(sigma)) {
 
   y<- generate_detections(entries_per_grp, gr=gr,
                           sigma=sigma[j],
-                          w=w, closest=FALSE,
-                          clustered = clustered,
-                          any = any)
+                          w=w, closest=FALSE)
+
 
   sigma_mle<- matrix(NA, ngrp, 2)
 
@@ -176,11 +172,9 @@ delta<- c(0.5,1,2,3)
 dpars<- expand.grid(sigma=sigma,delta=delta)
 w<- 12
 grp_size<- 1:10
-clustered<- FALSE
-any<- FALSE
 
 gr<- hn_func
-entries<- 1e6
+entries<- 1e5
 entries_per_grp<- rep(entries, length(grp_size))
 
 res<- vector("list", nrow(dpars))
@@ -195,9 +189,8 @@ sigma_true<- dpars$sigma[j]
 y<- generate_detections(entries_per_grp, gr=gr,
                         sigma=sigma_true,
                         w=w, closest=TRUE,
-                        binned=TRUE, breaks=bin_bp,
-                        clustered=clustered,
-                        any=any)
+                        binned=TRUE, breaks=bin_bp)
+
 
 ngrp<- length(y)
 
@@ -233,9 +226,8 @@ sigma_adj<- as_tibble(sigma_mle) %>%
 y<- generate_detections(entries_per_grp, gr=gr,
                         sigma=sigma_true,
                         w=w, closest=FALSE,
-                        binned=TRUE, breaks=bin_bp,
-                        clustered=clustered,
-                        any=any)
+                        binned=TRUE, breaks=bin_bp)
+
 
 sigma_mle<- matrix(NA, ngrp, 2)
 
@@ -301,13 +293,10 @@ sigma<- c(3,4,5)
 delta<- 2
 w<- 12
 entries<- 2e3
-nsims<- 500
+nsims<- 200
 gr<- hn_func
-clustered<- c(FALSE,TRUE)
-any<- c(FALSE,TRUE)
 
-dpars<- expand.grid(sigma=sigma, clustered = clustered, any=any)
-npars<- nrow(dpars)
+npars<- length(sigma)
 
 grp_freq<- list("Asocial" = c(0.97,0.02,0.01),
                 "Fallow deer" = c(0.55,0.3,0.12,0.02,0.01),
@@ -329,17 +318,15 @@ for(g in seq_along(grp_freq)) {
 
     ## Using closest distance and  adjusted availability
 
-    sigma_mle<- matrix(NA, npars, 5)
+    sigma_mle<- matrix(NA, npars, 3)
     grp_size<- seq_along(entries_per_group)
 
     for(j in 1:npars) {
 
       y<- generate_detections(entries_per_group, gr=gr,
-                              sigma=dpars$sigma[j],
+                              sigma=sigma[j],
                               w=w, closest=TRUE,
-                              binned=TRUE, breaks=bin_bp,
-                              any=dpars$any[j],
-                              clustered=dpars$clustered[j])
+                              binned=TRUE, breaks=bin_bp)
 
       mle <- optim(
         par = 1,
@@ -356,29 +343,26 @@ for(g in seq_along(grp_freq)) {
       H<- mle$hessian
       sigma_mle[j,1]<- exp(mle$par)
       sigma_mle[j,2]<- exp(mle$par) * sqrt(solve(H))
-      sigma_mle[j,3]<- dpars$sigma[j]
-      sigma_mle[j,4]<- as.numeric(dpars$clustered[j])
-      sigma_mle[j,5]<- as.numeric(dpars$any[j])
+      sigma_mle[j,3]<- sigma[j]
 
     }
-    colnames(sigma_mle)<- c("Est","SE","sigma","clustered","any")
+    colnames(sigma_mle)<- c("Est","SE","sigma")
     sigma_adj<- as_tibble(sigma_mle) %>%
       mutate(Model = "Closest distance")
 
 
     ## using all distances and standard availability i.e., gs==1
 
-    sigma_mle<- matrix(NA, npars, 5)
+    sigma_mle<- matrix(NA, npars, 3)
     grp_size<- rep(1, length(entries_per_group))
 
     for(j in 1:npars) {
 
       y<- generate_detections(entries_per_group, g=gr,
-                              sigma=dpars$sigma[j],
+                              sigma=sigma[j],
                               w=w, closest=FALSE,
-                              binned=TRUE, breaks=bin_bp,
-                              any=dpars$any[j],
-                              clustered=dpars$clustered[j])
+                              binned=TRUE, breaks=bin_bp)
+
 
       mle <- optim(
         par = 1,
@@ -396,11 +380,9 @@ for(g in seq_along(grp_freq)) {
       sigma_mle[j,1]<- exp(mle$par)
       sigma_mle[j,2]<- exp(mle$par) * sqrt(solve(H))
       sigma_mle[j,3]<- dpars$sigma[j]
-      sigma_mle[j,4]<- as.numeric(dpars$clustered[j])
-      sigma_mle[j,5]<- as.numeric(dpars$any[j])
 
     }
-    colnames(sigma_mle)<- c("Est","SE","sigma","clustered","any")
+    colnames(sigma_mle)<- c("Est","SE","sigma")
     sigma_unadj<- as_tibble(sigma_mle) %>%
       mutate(Model = "All distances")
 
@@ -427,10 +409,7 @@ saveRDS(freq_res, "outputs/freq_distribtion.rds")
 
 win.graph(12,5)
 freq_res %>% mutate(sigma = paste("\u03C3 =",sigma),
-                    Model = factor(Model, levels = c("Closest distance","All distances")),
-                    clustered = factor(clustered, labels=c("uniform","clustered")),
-                    any = factor(any, labels = c("closest only","any encounter"))) %>%
-  filter(clustered == "uniform" & any == "closest only") %>%
+                    Model = factor(Model, levels = c("Closest distance","All distances"))) %>%
   ggplot(aes(Group, Est, fill = Model)) +
   geom_violin(trim=TRUE) +
   stat_summary(aes(fill=Model),position=position_dodge(width=0.9),fun = median,
