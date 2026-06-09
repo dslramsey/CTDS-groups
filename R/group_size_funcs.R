@@ -145,9 +145,10 @@ availability_bins <- function(bin_start, bin_end, w, n=1) {
 ##---------------------------------------
 bin_probs_hn <- function(breaks, sigma, gs) {
   # probabilities for each bin given half-normal detection
-  # Need to integrate over each bin interval
+  # Need to integrate Eq. 5 over each bin interval to remove
+  # bias for larger bins.
   integrand <- function(r, sigma, w, gs) {
-    # product of availability, given group size and detection
+    # product of availability, given group size (gs) and detection
     availability_cont(r, w, gs) * hn_func(r, sigma)
   }
   K<- length(breaks) - 1
@@ -162,7 +163,7 @@ bin_probs_hn <- function(breaks, sigma, gs) {
 }
 
 ##------------------------------------------------------------
-# (3) Define conditional likelihood for continuous data
+# conditional likelihood for continuous data
 nll.cond.point.hn <- function(parm, x, w, gs){
   # HN detection function
   sigma <- exp(parm)
@@ -177,6 +178,7 @@ nll.cond.point.hn <- function(parm, x, w, gs){
 }
 
 ##------------------------------
+# conditional likelihood for binned data
 nll.cond.binned.hn <- function(parm, counts, gs, breaks){
   #gs is now a vector
   sigma <- exp(parm)

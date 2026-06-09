@@ -402,11 +402,6 @@ for(g in seq_along(grp_freq)) {
 
 freq_res<- list_rbind(freq_list)
 
-saveRDS(freq_res, "outputs/freq_distribtion.rds")
-
-# Plot of distribution effects
-#freq_res<- readRDS("outputs/freq_distribtion.rds")
-
 win.graph(12,5)
 freq_res %>% mutate(sigma = paste("\u03C3 =",sigma),
                     Model = factor(Model, levels = c("Closest distance","All distances"))) %>%

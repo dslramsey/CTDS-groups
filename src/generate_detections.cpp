@@ -1,16 +1,11 @@
 // generate_detections.cpp
 // Fast C++ implementation of generate_detections() via Rcpp.
 //
-// r == rho for uniform sector points (polar-coordinate identity)
+// r == rho for uniform points on circle (polar-coordinate identity)
 //
-// gr() is called ONCE per group size on a batched vector of distances,
+// gr() is called once per group size on a batched vector of distances,
 //
-// Detection modes :
-//   any=FALSE (default): group detected if closest individual detected through gr();
-//                        return closest or all distances depending on `closest`.
-//   any=TRUE           : each individual detected independently via gr(r_k);
-//                        return closest detected distance or all
-//                        distances depending on `closest`.
+
 
 #include <Rcpp.h>
 using namespace Rcpp;
