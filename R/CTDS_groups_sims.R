@@ -430,7 +430,7 @@ freq_res %>% mutate(sigma = paste("\u03C3 =",sigma),
                     Model = factor(Model, levels = c("Closest distance","All distances")),
                     clustered = factor(clustered, labels=c("uniform","clustered")),
                     any = factor(any, labels = c("closest only","any encounter"))) %>%
-  filter(clustered == "uniform" & any == "closest only") %>%
+  filter(clustered == "clustered" & any == "closest only") %>%
   ggplot(aes(Group, Est, fill = Model)) +
   geom_violin(trim=TRUE) +
   stat_summary(aes(fill=Model),position=position_dodge(width=0.9),fun = median,

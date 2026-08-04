@@ -101,6 +101,7 @@ dcluster_sector <- function(n, w, theta_max, n_clusters = 1, cluster_sd = 2,
   out
 }
 
+
 #-----------------------------------------------------------
 bin_matrix <- function(data, dist_col, breaks,
                             right = FALSE, include_lowest = TRUE) {
@@ -246,8 +247,11 @@ nll.cond.point.hn <- function(parm, x, w, gs){
     availability_cont(r, w, gs) * hn_func(r, sigma)
   }
   pbar <- integrate(intergrand, 0, w, sigma=sigma, w=w, gs=gs)$value
-  LL <- sum(log(p*A/pbar))
-  return(-LL)
+  # Guard against underflow
+  if (!is.finite(pbar) || pbar <= 0) return(1e10)
+  nll <- -sum(log(p * A / pbar))
+  if (!is.finite(nll)) return(1e10)
+  return(nll)
 }
 
 ##------------------------------
