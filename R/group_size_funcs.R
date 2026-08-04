@@ -172,9 +172,12 @@ nll.cond.point.hn <- function(parm, x, w, gs){
   intergrand<- function(r, sigma, w, gs) {
     availability_cont(r, w, gs) * hn_func(r, sigma)
   }
+  # Guard against underflow
   pbar <- integrate(intergrand, 0, w, sigma=sigma, w=w, gs=gs)$value
-  LL <- sum(log(p*A/pbar))
-  return(-LL)
+  if (!is.finite(pbar) || pbar <= 0) return(1e10)
+  nll <- -sum(log(p * A / pbar))
+  if (!is.finite(nll)) return(1e10)
+  return(nll)
 }
 
 ##------------------------------
