@@ -26,7 +26,7 @@ D<- 0.1
 ncams<- 50
 fov<- 40
 w<- 15
-sigma_true<- 5
+sigma_true<- 4
 bearing <- 270
 width<- 200
 height<- 200
@@ -46,6 +46,8 @@ cam_layout<- "grid"
                               camera_layout =  cam_layout,
                               cluster_radius = clus_rad,
                               mean_cluster_size =  clus_size)
+
+  summarise_density_sim(res_unif)
 
   res_clus <- run_density_sim(n_rep = 1000,
                               D_true = D,
@@ -79,7 +81,7 @@ cam_layout<- "grid"
   ncams<- 50
   fov<- 40
   w<- 15
-  sigma_true<- 5
+  sigma_true<- 4
   bearing <- 270
   width<- 200
   height<- 200

@@ -215,9 +215,10 @@ nll.cond.point.hn.groups <- function(parm, x, w, gs){
   for(i in 1:n_group_sizes) {
     pbar[i] <- integrate(intergrand, 0, w, sigma=sigma, w=w, gs=gs[i])$value
   }
-  if(any(is.na(pbar))) stop("pbar error")
-  nll <- sum(log(p*A/pbar))
-  return(-nll)
+  if (any(!is.finite(pbar)) || any(pbar <= 0)) return(1e10)
+  nll <- (-1)*sum(log(p*A/pbar))
+  if (!is.finite(nll)) return(1e10)
+  return(nll)
 }
 
 ##----------------------------------------
@@ -261,7 +262,6 @@ fit_detection_hn_groups <- function(dist, w, gs) {
     mle          = mle
   )
 }
-
 ##----------------------------------------
 estimate_density_multi <- function(counts, w, angle, fit, level = 0.95) {
   # Density from several independent camera sectors of equal area.
@@ -381,7 +381,7 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
 ##----------------------------------------------------------------------
 sim_groups <- function(D_true, sigma_true, w, fov, n_cam, width, height,
                      distribution = "uniform", cluster_radius = 30,
-                     mean_cluster_size = 5, min_total = 10,
+                     mean_cluster_size = 5, min_total = 20,
                      camera_layout = c("random", "grid")) {
   camera_layout <- match.arg(camera_layout)
   # Simulate one field, survey it with n_cam random cameras, fit and estimate.
@@ -418,18 +418,20 @@ sim_groups <- function(D_true, sigma_true, w, fov, n_cam, width, height,
   bearing <- rep(270, n_cam)
 
   counts <- integer(n_cam)
+  gsize <- rep(1, n_cam)
   dist <- rep(NA, n_cam)
   for (k in seq_len(n_cam)) {
     dk <- sample_sector_closest(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
                         radius = w, angle = fov, gr = hn_func, sigma = sigma_true)
     if(any(dk$detected == 1)){
       counts[k] <- nrow(dk)
+      gsize[k] <- nrow(dk)
       dist[k] <- dk$r[dk$detected==1]
     }
   }
   if (length(dist[!is.na(dist)]) < min_total) return(NULL)
   ii<- which(!is.na(dist))
-  fit <- fit_detection_hn_groups(dist[ii], w = w, gs = counts[ii]) # remove 0 counts
+  fit <- fit_detection_hn_groups(dist[ii], w = w, gs = gsize[ii]) # remove 0 counts
   est <- estimate_density_multi(counts, w = w, angle = fov, fit = fit)
 
   data.frame(
@@ -556,6 +558,7 @@ summarise_density_sim <- function(res) {
     pct_bias       = 100 * (mean(res$D) - truth$D_true) / truth$D_true,
     emp_SD         = sd(res$D),
     mean_est_SE    = mean(res$se),
+    emp_CV         = sd(res$D)/mean(res$D),
     coverage_95    = mean(res$cover)
   )
 }
