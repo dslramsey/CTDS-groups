@@ -133,22 +133,23 @@ estimate_density_multi <- function(counts, w, angle, fit, level = 0.95) {
   if (K < 2) stop("need at least 2 cameras for an empirical variance")
 
   n_total <- sum(counts)
-  theta <- angle * pi / 180
-  m <- function(sigma) {
-    integrate(function(r) r * hn_func(r, sigma), 0, w)$value
+  theta<- angle/360 * pi * w^2
+  m <- function(sigma, w, gs) {
+    # product of availability, given group size (gs) and detection
+    integrate(function(r) availability_cont(r, w, gs) * hn_func(r, sigma), 0 , w)$value
   }
 
-  a <- theta * m(fit$sigma)        # per-camera effective area
+  a <- theta * m(fit$sigma, w, gs=1)        # per-camera effective area
   D <- n_total / (K * a)
 
-  # Encounter-rate variance (P2)
+  # Encounter-rate variance (R2)
   R <- mean(counts)
   cv2_er <- sum((counts - R)^2) / (K * (K-1) * R^2)
 
   # Detection-function variance (delta method)
   h <- (abs(fit$log_sigma) + 1) * 1e-6
-  gradient <- (log(theta * m(exp(fit$log_sigma + h))) -
-              log(theta * m(exp(fit$log_sigma - h)))) / (2 * h)
+  gradient <- (log(theta * m(exp(fit$log_sigma + h), w, 1)) -
+              log(theta * m(exp(fit$log_sigma - h), w, 1))) / (2 * h)
   cv2_det <- (gradient * fit$se_log_sigma)^2
 
   cv2 <- cv2_er + cv2_det

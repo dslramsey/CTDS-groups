@@ -141,7 +141,6 @@ availability_bins <- function(bin_start, bin_end, w, n=1) {
  return((1 - bin_start^2/w^2)^n - (1 - bin_end^2/w^2)^n)
 }
 
-
 ##---------------------------------------
 bin_probs_hn <- function(breaks, sigma, gs) {
   # probabilities for each bin given half-normal detection
