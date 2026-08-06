@@ -173,8 +173,10 @@ nll.cond.point.hn <- function(parm, x, w, gs){
     availability_cont(r, w, gs) * hn_func(r, sigma)
   }
   pbar <- integrate(intergrand, 0, w, sigma=sigma, w=w, gs=gs)$value
-  LL <- sum(log(p*A/pbar))
-  return(-LL)
+  if (any(!is.finite(pbar)) || any(pbar <= 0)) return(1e10)
+  nll <- (-1)*sum(log(p*A/pbar))
+  if (!is.finite(nll)) return(1e10)
+  return(nll)
 }
 
 ##------------------------------

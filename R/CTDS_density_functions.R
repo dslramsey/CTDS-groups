@@ -1,53 +1,4 @@
 
-##----------------------------------------
-simulate_animals <- function(n,
-                             xlim = c(0, 1),
-                             ylim = c(0, 1),
-                             distribution = c("uniform", "clustered"),
-                             n_clusters = 5,
-                             cluster_sd = NULL) {
-  # Simulate a 2D point pattern of n animals within the rectangle
-  # defined by xlim/ylim.
-  #   distribution = "uniform"   : complete spatial randomness
-  #   distribution = "clustered" : Thomas-style process; parents (cluster
-  #                                centres) are uniform, offspring are Gaussian
-  #                                scattered about a parent with sd cluster_sd
-  # Returns a data.frame(x, y, cluster); cluster is NA for the uniform case.
-  distribution <- match.arg(distribution)
-
-  if (distribution == "uniform") {
-    return(data.frame(
-      x = runif(n, xlim[1], xlim[2]),
-      y = runif(n, ylim[1], ylim[2]),
-      cluster = NA_integer_
-    ))
-  }
-
-  # Clustered: default scatter is 5% of the smaller region dimension
-  if (is.null(cluster_sd)) {
-    cluster_sd <- 0.05 * min(diff(xlim), diff(ylim))
-  }
-
-  # Cluster centres (parents) placed uniformly
-  cx <- runif(n_clusters, xlim[1], xlim[2])
-  cy <- runif(n_clusters, ylim[1], ylim[2])
-
-  # Assign each animal to a cluster, then scatter around its parent.
-  cluster_id <- sample.int(n_clusters, n, replace = TRUE)
-  x <- rnorm(n, cx[cluster_id], cluster_sd)
-  y <- rnorm(n, cy[cluster_id], cluster_sd)
-
-  # Vectorized rejection: resample any points that fall outside the rectangle
-  outside <- x < xlim[1] | x > xlim[2] | y < ylim[1] | y > ylim[2]
-  while (any(outside)) {
-    idx <- which(outside)
-    x[idx] <- rnorm(length(idx), cx[cluster_id[idx]], cluster_sd)
-    y[idx] <- rnorm(length(idx), cy[cluster_id[idx]], cluster_sd)
-    outside <- x < xlim[1] | x > xlim[2] | y < ylim[1] | y > ylim[2]
-  }
-
-  data.frame(x = x, y = y, cluster = cluster_id)
-}
 ##-----------------------------------------------
 generate_animals <- function(
     width,
@@ -150,78 +101,6 @@ sample_sector <- function(points,
 }
 
 ##----------------------------------------
-sample_sector_closest <- function(points,
-                          origin = c(0, 0),
-                          bearing = 0,
-                          radius,
-                          angle,
-                          gr = NULL,
-                          ...) {
-  # Sample (detect) animals falling within a camera FOV sector.
-  #   points  : data.frame with columns x, y (e.g. from simulate_animals)
-  #   origin  : c(x, y) camera location
-  #   bearing : central viewing direction in degrees (0 = +x axis, CCW)
-  #   radius  : detection radius of the sector (w)
-  #   angle   : full angular width of the FOV in degrees (split +/- about bearing)
-  #   gr      : optional detection function gr(r, ...) returning P(detect) in
-  #             [0, 1]. When supplied, animals inside the sector are thinned by
-  #             a Bernoulli(gr(r)) draw. When NULL, detection is perfect within
-  #             the sector.
-  #   ...     : additional parameters passed to gr() (e.g. sigma).
-  # Returns detected points with polar coordinates r (distance from camera)
-  # and theta (angle relative to bearing, radians), plus the detection
-  # probability p when gr is supplied.
-  dx <- points$x - origin[1]
-  dy <- points$y - origin[2]
-  r <- sqrt(dx^2 + dy^2)
-
-  # Angle of each point relative to the bearing, wrapped to (-pi, pi]
-  theta <- atan2(dy, dx) - bearing * pi / 180
-  theta <- atan2(sin(theta), cos(theta))
-
-  half <- (angle * pi / 180) / 2
-  inside <- r <= radius & abs(theta) <= half
-  detected<- rep(0, length(r))
-
-  out <- points[inside, , drop = FALSE]
-  out$r <- r[inside]
-  out$theta <- theta[inside]
-  out$detected<- detected[inside]
-  out <- out[order(out$r), , drop = FALSE]
-
-  # Thin by the detection function: keep each in-view animal with prob gr(r)
-  if (sum(inside) > 0) {
-    p <- gr(out$r[1], ...)
-    det<- rbinom(1, 1, p)
-    if(det == 1) out$detected[1] <- det
-  }
-  out
-}
-
-##------------------------------------------------------------
-
-# conditional likelihood for continuous data
-nll.cond.point.hn.groups <- function(parm, x, w, gs){
-  # HN detection function
-  sigma <- exp(parm)
-  n_group_sizes<- length(gs)
-  if(n_group_sizes != length(x)) stop("error")
-  pbar<- rep(NA, n_group_sizes)
-  intergrand<- function(r, sigma, w, gs) {
-    availability_cont(r, w, gs) * hn_func(r, sigma)
-  }
-  p <- hn_func(x, sigma)
-  A<- availability_cont(x, w, gs)
-  for(i in 1:n_group_sizes) {
-    pbar[i] <- integrate(intergrand, 0, w, sigma=sigma, w=w, gs=gs[i])$value
-  }
-  if (any(!is.finite(pbar)) || any(pbar <= 0)) return(1e10)
-  nll <- (-1)*sum(log(p*A/pbar))
-  if (!is.finite(nll)) return(1e10)
-  return(nll)
-}
-
-##----------------------------------------
 fit_detection_hn <- function(dist, w) {
   # Fit a half-normal detection function to observed sector distances by
   # conditional MLE (point/sector transect; group size 1). Reuses
@@ -242,26 +121,6 @@ fit_detection_hn <- function(dist, w) {
   )
 }
 
-##----------------------------------------
-fit_detection_hn_groups <- function(dist, w, gs) {
-  # Fit a half-normal detection function to observed sector distances by
-  # conditional MLE (point/sector transect; group size 1). Reuses
-  # nll.cond.point.hn, whose conditional likelihood does not depend on the
-  # sector angle. Returns sigma with an SE on the log scale (from the Hessian).
-  mle <- optim(
-    par = log(w / 2),
-    fn = nll.cond.point.hn.groups,
-    x = dist, w = w, gs = gs,
-    method = "Brent", lower = -5, upper = 5,
-    hessian = TRUE
-  )
-  list(
-    sigma        = exp(mle$par),
-    log_sigma    = mle$par,
-    se_log_sigma = sqrt(1 / mle$hessian[1, 1]),
-    mle          = mle
-  )
-}
 ##----------------------------------------
 estimate_density_multi <- function(counts, w, angle, fit, level = 0.95) {
   # Density from several independent camera sectors of equal area.
@@ -378,75 +237,6 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
     cover        = est$lcl <= D_true & D_true <= est$ucl
   )
 }
-##----------------------------------------------------------------------
-sim_groups <- function(D_true, sigma_true, w, fov, n_cam, width, height,
-                     distribution = "uniform", cluster_radius = 30,
-                     mean_cluster_size = 5, min_total = 20,
-                     camera_layout = c("random", "grid")) {
-  camera_layout <- match.arg(camera_layout)
-  # Simulate one field, survey it with n_cam random cameras, fit and estimate.
-  # Returns a one-row data.frame, or NULL if too few pooled detections to fit.
-  #D_true<- D_km2/1e6 # D_true is density per m2
-  n_animals <- round(D_true * width * height)
-
-  # animals <- simulate_animals(n_animals, xlim, ylim, distribution,
-  #                             n_clusters = n_clusters, cluster_sd = cluster_sd)
-  animals<- generate_animals(width = width,
-                             height = height,
-                             density = D_true,
-                             distribution = distribution,
-                             cluster_radius = cluster_radius,
-                             mean_cluster_size = mean_cluster_size)
-
-  # Camera locations, kept >= w from every edge so each sector stays
-  # fully inside the region for any bearing (requires region wider than 2w).
-  if (camera_layout == "grid") {
-    # Build a near-square grid of >= n_cam points within the interior, spaced
-    # evenly and inset by w from each edge, then take the first n_cam of them.
-    n_col <- ceiling(sqrt(n_cam * (width - 2 * w) / (height - 2 * w)))
-    n_row <- ceiling(n_cam / n_col)
-    gx <- seq(w, width - w, length.out = n_col)
-    gy <- seq(w, height - w, length.out = n_row)
-    grid <- expand.grid(x = gx, y = gy)[seq_len(n_cam), ]
-    cx <- grid$x
-    cy <- grid$y
-  } else {
-    cx <- runif(n_cam, w, width - w)
-    cy <- runif(n_cam, w, height - w)
-  }
-#  bearing <- runif(n_cam, 0, 360)
-  bearing <- rep(270, n_cam)
-
-  counts <- integer(n_cam)
-  gsize <- rep(1, n_cam)
-  dist <- rep(NA, n_cam)
-  for (k in seq_len(n_cam)) {
-    dk <- sample_sector_closest(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
-                        radius = w, angle = fov, gr = hn_func, sigma = sigma_true)
-    if(any(dk$detected == 1)){
-      counts[k] <- nrow(dk)
-      gsize[k] <- nrow(dk)
-      dist[k] <- dk$r[dk$detected==1]
-    }
-  }
-  if (length(dist[!is.na(dist)]) < min_total) return(NULL)
-  ii<- which(!is.na(dist))
-  fit <- fit_detection_hn_groups(dist[ii], w = w, gs = gsize[ii]) # remove 0 counts
-  est <- estimate_density_multi(counts, w = w, angle = fov, fit = fit)
-
-  data.frame(
-    n_total      = est$n,
-    mean_n       = mean(counts),
-    sigma        = fit$sigma,
-    D            = est$D,
-    se           = est$se,
-    cv_encounter = est$cv_encounter,
-    cv_detection = est$cv_detection,
-    lcl          = est$lcl,
-    ucl          = est$ucl,
-    cover        = est$lcl <= D_true & D_true <= est$ucl
-  )
-}
 
 ##------------------------------------
 generate_cam_locs<- function(n_cam, w, width, height, bearing, camera_layout = c("random","grid")) {
@@ -505,44 +295,6 @@ run_density_sim <- function(n_rep = 5,
                              distribution = distribution)
   out
 }
-
-##---------------------------------------
-run_density_sim_groups <- function(n_rep = 5,
-                            D_true = 0.01,
-                            sigma_true = 4,
-                            w = 12,
-                            fov = 40,
-                            n_cam = 60,
-                            width = 500,
-                            height = 500,
-                            distribution = c("uniform", "clustered"),
-                            cluster_radius = 30,
-                            mean_cluster_size = 5,
-                            camera_layout = c("random", "grid"),
-                            progress = TRUE) {
-  # Each replicate places n_cam random cameras; the encounter-rate variance is
-  # estimated across those cameras. Under clustering the empirical variance
-  # captures over-dispersion, so CI coverage should recover toward nominal.
-  distribution <- match.arg(distribution)
-  camera_layout <- match.arg(camera_layout)
-  res <- vector("list", n_rep)
-  pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
-  for (i in seq_len(n_rep)) {
-    res[[i]] <- sim_groups(D_true, sigma_true, w, fov, n_cam, width, height,
-                         distribution = distribution,
-                         cluster_radius = cluster_radius,
-                         mean_cluster_size = mean_cluster_size,
-                         camera_layout = camera_layout)
-    if (progress) utils::setTxtProgressBar(pb, i)
-  }
-  if (progress) close(pb)
-  out <- bind_rows(res)
-  attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
-                             w = w, fov = fov, n_cam = n_cam,
-                             distribution = distribution)
-  out
-}
-
 
 ##---------------------------------------
 ## Summaries and plots
