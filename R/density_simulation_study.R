@@ -34,6 +34,9 @@ clus_rad <- 5
 clus_size<- 20
 cam_layout<- "grid"
 
+delta<- 3
+bin_bp <- seq(0, w, by = delta)  # bin breakpoints
+
   res_unif <- run_density_sim(n_rep = 1000,
                               D_true = D,
                               sigma_true = sigma_true,
@@ -45,7 +48,9 @@ cam_layout<- "grid"
                               distribution = "uniform",
                               camera_layout =  cam_layout,
                               cluster_radius = clus_rad,
-                              mean_cluster_size =  clus_size)
+                              mean_cluster_size =  clus_size,
+                              binned = TRUE,
+                              breaks = bin_bp)
 
   summarise_density_sim(res_unif)
 
@@ -60,7 +65,9 @@ cam_layout<- "grid"
                               distribution = "clustered",
                               camera_layout = cam_layout,
                               cluster_radius = clus_rad,
-                              mean_cluster_size =  clus_size)
+                              mean_cluster_size =  clus_size,
+                              binned = TRUE,
+                              breaks = bin_bp)
 
 
   print(bind_rows(

@@ -100,19 +100,45 @@ sample_sector <- function(points,
   out
 }
 
+##-------------------------------------------------------
+make_bins <- function(dist, breaks, right = FALSE, include_lowest = TRUE) {
+  ## bin data keeping site hierarchy
+  bin <- cut(dist, breaks = breaks, right = right, include.lowest = include_lowest)
+  bin_levels <- levels(bin)
+  # observed counts
+  counts <- as.data.frame(table(bin = bin, useNA = "no"),
+                          stringsAsFactors = FALSE)
+
+  full <- data.frame(bin = bin_levels, stringsAsFactors = FALSE)
+  merged <- merge(full, counts, by = "bin", all.x = TRUE, sort=FALSE)
+  merged$Freq[is.na(merged$Freq)] <- 0L
+  merged$bin<- factor(merged$bin, levels=bin_levels)
+  # cast to matrix
+  mat <- xtabs(Freq ~ bin, data = merged)
+  return(mat)
+}
+
 ##----------------------------------------
-fit_detection_hn <- function(dist, w) {
+fit_detection_hn <- function(dist, w, binned = FALSE, breaks = NULL) {
   # Fit a half-normal detection function to observed sector distances by
   # conditional MLE (point/sector transect; group size 1). Reuses
   # nll.cond.point.hn, whose conditional likelihood does not depend on the
   # sector angle. Returns sigma with an SE on the log scale (from the Hessian).
+  if(binned & ! is.null(breaks)) {
   mle <- optim(
     par = log(w / 2),
-    fn = nll.cond.point.hn,
-    x = dist, w = w, gs = 1,
+    fn = nll.cond.binned.hn,
+    counts = dist, gs = 1, breaks = breaks,
     method = "Brent", lower = -5, upper = 5,
-    hessian = TRUE
-  )
+    hessian = TRUE)
+  } else {
+    mle <- optim(
+      par = log(w / 2),
+      fn = nll.cond.point.hn,
+      x = dist, gs = 1, w = w, gs = 1,
+      method = "Brent", lower = -5, upper = 5,
+      hessian = TRUE)
+  }
   list(
     sigma        = exp(mle$par),
     log_sigma    = mle$par,
@@ -172,7 +198,8 @@ estimate_density_multi <- function(counts, w, angle, fit, level = 0.95) {
 sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
                      distribution = "uniform", cluster_radius = 30,
                      mean_cluster_size = 5, min_total = 10,
-                     camera_layout = c("random", "grid")) {
+                     camera_layout = c("random", "grid"),
+                     binned = FALSE, breaks = NULL) {
   camera_layout <- match.arg(camera_layout)
   # Simulate one field, survey it with n_cam random cameras, fit and estimate.
   # Returns a one-row data.frame, or NULL if too few pooled detections to fit.
@@ -218,12 +245,18 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
     counts[k] <- nrow(dk)
     dist_list[[k]] <- dk$r
   }
+
   dist <- unlist(dist_list)
   if (length(dist) < min_total) return(NULL)
 
-  fit <- fit_detection_hn(dist, w = w)
-  est <- estimate_density_multi(counts, w = w, angle = fov, fit = fit)
+  if(binned & !is.null(breaks)) {
+    bin_counts<- make_bins(dist, breaks = breaks)
+    fit <- fit_detection_hn(bin_counts, w=w, binned=TRUE, breaks=breaks)
+  } else {
+      fit <- fit_detection_hn(dist, w=w)
+  }
 
+  est <- estimate_density_multi(counts, w = w, angle = fov, fit = fit)
 
   data.frame(
     n_total      = est$n,
@@ -273,6 +306,8 @@ run_density_sim <- function(n_rep = 5,
                             cluster_radius = 30,
                             mean_cluster_size = 5,
                             camera_layout = c("random", "grid"),
+                            binned = FALSE,
+                            breaks = NULL,
                             progress = TRUE) {
   # Each replicate places n_cam random cameras; the encounter-rate variance is
   # estimated across those cameras. Under clustering the empirical variance
@@ -286,7 +321,9 @@ run_density_sim <- function(n_rep = 5,
                          distribution = distribution,
                          cluster_radius = cluster_radius,
                          mean_cluster_size = mean_cluster_size,
-                         camera_layout = camera_layout)
+                         camera_layout = camera_layout,
+                         binned = binned,
+                         breaks = breaks)
     if (progress) utils::setTxtProgressBar(pb, i)
   }
   if (progress) close(pb)

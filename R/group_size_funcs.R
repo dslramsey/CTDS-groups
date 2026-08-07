@@ -186,13 +186,14 @@ nll.cond.binned.hn <- function(parm, counts, gs, breaks){
   n_group_sizes<- length(gs)
   if(!is.list(counts)) counts<- list(counts)
   if(n_group_sizes != length(counts)) stop("error")
-  LL<- rep(NA, n_group_sizes)
+  nll<- rep(NA, n_group_sizes)
   for(i in 1:n_group_sizes) {
     grp_counts<- counts[[i]]
     pd<- bin_probs_hn(breaks, sigma, gs[i])
     cp<- pd/sum(pd) # cp must sum to 1
-    LL[i] <- sum(grp_counts * log(cp))
+    nll[i] <- sum(grp_counts * log(cp))
   }
-  return(-sum(LL))
+  if(any(!is.finite(nll))) return(1e10)
+  return(-sum(nll))
 }
 
