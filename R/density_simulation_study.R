@@ -23,13 +23,13 @@ source("R/CTDS_density_functions.R")
 ## no group effects
 ##---------------------------------------
 D<- 0.1
-ncams<- 50
+ncams<- 100
 fov<- 40
 w<- 15
 sigma_true<- 4
 bearing <- 270
-width<- 200
-height<- 200
+width<- 500
+height<- 500
 clus_rad <- 5
 clus_size<- 20
 cam_layout<- "grid"
@@ -54,7 +54,53 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 
   summarise_density_sim(res_unif)
 
+  res_unif_cl <- run_density_closest(n_rep = 1000,
+                                  D_true = D,
+                                  sigma_true = sigma_true,
+                                  w = w,
+                                  fov = fov,
+                                  n_cam = ncams,
+                                  width = width,
+                                  height = height,
+                                  distribution = "uniform",
+                                  camera_layout =  cam_layout,
+                                  cluster_radius = clus_rad,
+                                  mean_cluster_size =  clus_size,
+                                  binned = TRUE,
+                                  breaks = bin_bp)
+
+
+
+  print(bind_rows(
+    summarise_density_sim(res_unif),
+    summarise_density_sim(res_unif_cl)
+  ))
+
+  win.graph(10,10)
+  plot_density_sim(res_unif)
+
+  win.graph(10,10)
+  plot_density_sim(res_unif_cl)
+
+##----------------------------------------------------------------
   res_clus <- run_density_sim(n_rep = 1000,
+                              D_true = D,
+                              sigma_true = sigma_true,
+                              w = w,
+                              fov = fov,
+                              n_cam = ncams,
+                              width = width,
+                              height = height,
+                              distribution = "clustered",
+                              camera_layout = cam_layout,
+                              cluster_radius = clus_rad,
+                              mean_cluster_size =  clus_size,
+                              binned = TRUE,
+                              breaks = bin_bp)
+
+  summarise_density_sim(res_clus)
+
+  res_clus_cl <- run_density_closest(n_rep = 1000,
                               D_true = D,
                               sigma_true = sigma_true,
                               w = w,
@@ -81,13 +127,12 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
   win.graph(10,10)
   plot_density_sim(res_clus)
 
-
 ##-----------------------------------------------------------------
 
   animals<- generate_animals(width = width,
                              height = height,
                              density = D,
-                             distribution = "clustered",
+                             distribution = "uniform",
                              cluster_radius = 5,
                              mean_cluster_size = 100)
 

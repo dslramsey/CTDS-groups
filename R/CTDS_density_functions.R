@@ -99,7 +99,24 @@ sample_sector <- function(points,
 
   out
 }
+##-----------------------------------------------------
+table_counts<- function(counts, dists, breaks) {
+  ii<- which(counts > 0)
+  c_nonzero<- counts[ii]
+  dd<- dists[ii]
 
+  fc<- table(c_nonzero)
+  n<- length(fc)
+  blist<- vector("list", n)
+  grps<- as.integer(names(fc))
+
+  for(i in seq_len(n)) {
+    ii<- which(c_nonzero == grps[i])
+    d2<- dd[ii]
+    blist[[i]]<- make_bins(d2, breaks=bin_bp)
+  }
+  list(bin_list=blist, grps=grps)
+}
 ##-------------------------------------------------------
 make_bins <- function(dist, breaks, right = FALSE, include_lowest = TRUE) {
   ## bin data keeping site hierarchy
@@ -119,18 +136,18 @@ make_bins <- function(dist, breaks, right = FALSE, include_lowest = TRUE) {
 }
 
 ##----------------------------------------
-fit_detection_hn <- function(dist, w, binned = FALSE, breaks = NULL) {
+fit_detection_hn <- function(dist, w, gs = 1, binned = FALSE, breaks = NULL) {
   # Fit a half-normal detection function to observed sector distances by
   # conditional MLE (point/sector transect; group size 1). Reuses
   # nll.cond.point.hn, whose conditional likelihood does not depend on the
   # sector angle. Returns sigma with an SE on the log scale (from the Hessian).
   if(binned & ! is.null(breaks)) {
-  mle <- optim(
-    par = log(w / 2),
-    fn = nll.cond.binned.hn,
-    counts = dist, gs = 1, breaks = breaks,
-    method = "Brent", lower = -5, upper = 5,
-    hessian = TRUE)
+    mle <- optim(
+      par = log(w / 2),
+      fn = nll.cond.binned.hn,
+      counts = dist, gs = gs, breaks = breaks,
+      method = "Brent", lower = -5, upper = 5,
+      hessian = TRUE)
   } else {
     mle <- optim(
       par = log(w / 2),
@@ -148,7 +165,7 @@ fit_detection_hn <- function(dist, w, binned = FALSE, breaks = NULL) {
 }
 
 ##----------------------------------------
-estimate_density_multi <- function(counts, w, angle, fit, level = 0.95) {
+estimate_density_ctds <- function(counts, w, angle, fit, level = 0.95) {
   # Density from several independent camera sectors of equal area.
   # counts : per-camera detection counts (length K, may include zeros)
   # fit    : output of fit_detection_hn() on the pooled distances
@@ -186,6 +203,59 @@ estimate_density_multi <- function(counts, w, angle, fit, level = 0.95) {
 
   list(
     D = D, n = n_total, K = K, eff_area = a, sigma = fit$sigma,
+    se = se_D, cv = sqrt(cv2),
+    cv_encounter = sqrt(cv2_er), cv_detection = sqrt(cv2_det),
+    lcl = D / c_mult, ucl = D * c_mult
+  )
+}
+
+##----------------------------------------
+estimate_density_closest <- function(counts, w, angle, fit, level = 0.95) {
+  # Density from several independent camera sectors of equal area.
+  # counts : per-camera detection counts (length K, may include zeros)
+  # fit    : output of fit_detection_hn() on the pooled distances
+  # Encounter-rate variance is estimated empirically from the cameras
+  # counts using Fewster et al: Biometrics (2009)
+  # The detection-function variance is added via the delta method.
+  K <- length(counts)
+  if (K < 2) stop("need at least 2 cameras for an empirical variance")
+
+  n_total <- sum(counts)
+  theta<- angle/360 * pi * w^2
+  m <- function(sigma, w, gs) {
+    # product of availability, given group size (gs) and detection
+    integrate(function(r) availability_cont(r, w, gs) * hn_func(r, sigma), 0 , w)$value
+  }
+
+  ak<- rep(NA_real_, K)
+  Dk<- rep(NA_real_, K)
+  c_nonzero<- counts
+  c_nonzero[c_nonzero < 1]<- 1 # Zero counts get group size 1 for areas
+
+  for(k in seq_len(K)) {
+    ak[k] <- theta * m(fit$sigma, w, gs=c_nonzero[k])        # per-camera effective area
+    Dk[k] <- counts[k]/ak[k]
+  }
+
+  D<- mean(Dk)
+  # Encounter-rate variance (R2)
+  R <- mean(counts)
+  cv2_er <- sum((counts - R)^2) / (K * (K-1) * R^2)
+
+  # Detection-function variance (delta method)
+  h <- (abs(fit$log_sigma) + 1) * 1e-6
+  gradient <- (log(theta * m(exp(fit$log_sigma + h), w, 1)) -
+                 log(theta * m(exp(fit$log_sigma - h), w, 1))) / (2 * h)
+  cv2_det <- (gradient * fit$se_log_sigma)^2
+
+  cv2 <- cv2_er + cv2_det
+  se_D <- D * sqrt(cv2)
+
+  z <- qnorm(1 - (1 - level) / 2)
+  c_mult <- exp(z * sqrt(log(1 + cv2)))
+
+  list(
+    D = D, n = n_total, K = K, eff_area = mean(ak), sigma = fit$sigma,
     se = se_D, cv = sqrt(cv2),
     cv_encounter = sqrt(cv2_er), cv_detection = sqrt(cv2_det),
     lcl = D / c_mult, ucl = D * c_mult
@@ -251,12 +321,12 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
 
   if(binned & !is.null(breaks)) {
     bin_counts<- make_bins(dist, breaks = breaks)
-    fit <- fit_detection_hn(bin_counts, w=w, binned=TRUE, breaks=breaks)
+    fit <- fit_detection_hn(bin_counts, w=w, gs=1, binned=TRUE, breaks=breaks)
   } else {
       fit <- fit_detection_hn(dist, w=w)
   }
 
-  est <- estimate_density_multi(counts, w = w, angle = fov, fit = fit)
+  est <- estimate_density_ctds(counts, w = w, angle = fov, fit = fit)
 
   data.frame(
     n_total      = est$n,
@@ -272,8 +342,33 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
   )
 }
 
-##------------------------------------
-generate_cam_locs<- function(n_cam, w, width, height, bearing, camera_layout = c("random","grid")) {
+##---------------------------------------
+## Closest distance
+##---------------------------------------
+sim_closest <- function(D_true, sigma_true, w, fov, n_cam, width, height,
+                     distribution = "uniform", cluster_radius = 30,
+                     mean_cluster_size = 5, min_total = 10,
+                     camera_layout = c("random", "grid"),
+                     binned = FALSE, breaks = NULL) {
+  camera_layout <- match.arg(camera_layout)
+  # Simulate one field, survey it with n_cam random cameras, fit and estimate.
+  # Returns a one-row data.frame, or NULL if too few pooled detections to fit.
+  #D_true<- D_km2/1e6 # D_true is density per m2
+  n_animals <- round(D_true * width * height)
+
+
+  # animals <- simulate_animals(n_animals, xlim, ylim, distribution,
+  #                             n_clusters = n_clusters, cluster_sd = cluster_sd)
+  animals<- generate_animals(width = width,
+                             height = height,
+                             density = D_true,
+                             distribution = distribution,
+                             cluster_radius = cluster_radius,
+                             mean_cluster_size = mean_cluster_size)
+
+
+  # Camera locations, kept >= w from every edge so each sector stays
+  # fully inside the region for any bearing (requires region wider than 2w).
   if (camera_layout == "grid") {
     # Build a near-square grid of >= n_cam points within the interior, spaced
     # evenly and inset by w from each edge, then take the first n_cam of them.
@@ -282,15 +377,56 @@ generate_cam_locs<- function(n_cam, w, width, height, bearing, camera_layout = c
     gx <- seq(w, width - w, length.out = n_col)
     gy <- seq(w, height - w, length.out = n_row)
     grid <- expand.grid(x = gx, y = gy)[seq_len(n_cam), ]
-    cx <- grid$x + rnorm(n_cam, 0, sqrt(w))
-    cy <- grid$y + rnorm(n_cam, 0, sqrt(w))
+    cx <- grid$x
+    cy <- grid$y
   } else {
     cx <- runif(n_cam, w, width - w)
     cy <- runif(n_cam, w, height - w)
   }
-  bearing = rep(bearing, n_cam)
-  data.frame(cx=cx, cy=cy, bearing = bearing)
+  #  bearing <- runif(n_cam, 0, 360)
+  bearing <- rep(270, n_cam)
+
+  counts <- integer(n_cam)
+  dist_vec <- rep(NA_real_, n_cam)
+  for (k in seq_len(n_cam)) {
+    dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
+                        radius = w, angle = fov)
+    if(nrow(dk) == 0L) next
+    r_closest <- min(dk$r)
+    if (rbinom(1, 1, hn_func(r_closest, sigma_true)) == 1L) {
+      counts[k] <- nrow(dk)
+      dist_vec[k] <- r_closest
+    }
+  }
+  if (length(dist_vec[!is.na(dist_vec)]) < min_total) return(NULL)
+
+  if(binned & !is.null(breaks)) {
+    tabs<- table_counts(counts, dist_vec, breaks = breaks)
+    bin_counts<- tabs$bin_list
+    grps<- tabs$grps
+    fit <- fit_detection_hn(bin_counts, w=w, gs=grps, binned=TRUE, breaks=breaks)
+  } else {
+    dist <- dist_vec[!is.na(dist_vec)]
+    fit <- fit_detection_hn(dist, w=w)
+  }
+
+  est <- estimate_density_closest(counts, w = w, angle = fov, fit = fit)
+
+  data.frame(
+    n_total      = est$n,
+    mean_n       = mean(counts),
+    sigma        = fit$sigma,
+    D            = est$D,
+    se           = est$se,
+    cv_encounter = est$cv_encounter,
+    cv_detection = est$cv_detection,
+    lcl          = est$lcl,
+    ucl          = est$ucl,
+    cover        = est$lcl <= D_true & D_true <= est$ucl
+  )
 }
+
+
 ##---------------------------------------
 ## Many replicates
 ##---------------------------------------
@@ -335,6 +471,49 @@ run_density_sim <- function(n_rep = 5,
 }
 
 ##---------------------------------------
+## Many replicates
+##---------------------------------------
+run_density_closest <- function(n_rep = 5,
+                            D_true = 0.01,
+                            sigma_true = 4,
+                            w = 12,
+                            fov = 40,
+                            n_cam = 60,
+                            width = 500,
+                            height = 500,
+                            distribution = c("uniform", "clustered"),
+                            cluster_radius = 30,
+                            mean_cluster_size = 5,
+                            camera_layout = c("random", "grid"),
+                            binned = FALSE,
+                            breaks = NULL,
+                            progress = TRUE) {
+  # Each replicate places n_cam random cameras; the encounter-rate variance is
+  # estimated across those cameras. Under clustering the empirical variance
+  # captures over-dispersion, so CI coverage should recover toward nominal.
+  distribution <- match.arg(distribution)
+  camera_layout <- match.arg(camera_layout)
+  res <- vector("list", n_rep)
+  pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
+  for (i in seq_len(n_rep)) {
+    res[[i]] <- sim_closest(D_true, sigma_true, w, fov, n_cam, width, height,
+                            distribution = distribution,
+                            cluster_radius = cluster_radius,
+                            mean_cluster_size = mean_cluster_size,
+                            camera_layout = camera_layout,
+                            binned = binned,
+                            breaks = breaks)
+    if (progress) utils::setTxtProgressBar(pb, i)
+  }
+  if (progress) close(pb)
+  out <- bind_rows(res)
+  attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
+                             w = w, fov = fov, n_cam = n_cam,
+                             distribution = distribution)
+  out
+}
+
+##---------------------------------------
 ## Summaries and plots
 ##---------------------------------------
 summarise_density_sim <- function(res) {
@@ -345,13 +524,16 @@ summarise_density_sim <- function(res) {
     replicates     = nrow(res),
     D_true         = truth$D_true,
     mean_Dhat      = mean(res$D),
-    pct_bias       = 100 * (mean(res$D) - truth$D_true) / truth$D_true,
+    rel_bias       = (mean(res$D) - truth$D_true) / truth$D_true,
     emp_SD         = sd(res$D),
     mean_est_SE    = mean(res$se),
+    mean_cv_enc    = mean(res$cv_encounter),
+    mean_cv_det    = mean(res$cv_detection),
     emp_CV         = sd(res$D)/mean(res$D),
     coverage_95    = mean(res$cover)
   )
 }
+
 
 plot_density_sim <- function(res, n_show = 100) {
   truth <- attr(res, "truth")
@@ -383,6 +565,25 @@ plot_density_sim <- function(res, n_show = 100) {
   p1 / p2
 }
 
+##------------------------------------
+generate_cam_locs<- function(n_cam, w, width, height, bearing, camera_layout = c("random","grid")) {
+  if (camera_layout == "grid") {
+    # Build a near-square grid of >= n_cam points within the interior, spaced
+    # evenly and inset by w from each edge, then take the first n_cam of them.
+    n_col <- ceiling(sqrt(n_cam * (width - 2 * w) / (height - 2 * w)))
+    n_row <- ceiling(n_cam / n_col)
+    gx <- seq(w, width - w, length.out = n_col)
+    gy <- seq(w, height - w, length.out = n_row)
+    grid <- expand.grid(x = gx, y = gy)[seq_len(n_cam), ]
+    cx <- grid$x
+    cy <- grid$y
+  } else {
+    cx <- runif(n_cam, w, width - w)
+    cy <- runif(n_cam, w, height - w)
+  }
+  bearing = rep(bearing, n_cam)
+  data.frame(cx=cx, cy=cy, bearing = bearing)
+}
 ##----------------------------------------
 sector_polygon <- function(id, origin, bearing, radius, angle, n = 30) {
   # Build a closed polygon (data.frame of vertices) for one camera FOV sector,
