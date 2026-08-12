@@ -171,7 +171,11 @@ nll.cond.point.hn <- function(parm, x, w, gs){
   intergrand<- function(r, sigma, w, gs) {
     availability_cont(r, w, gs) * hn_func(r, sigma)
   }
-  pbar <- integrate(intergrand, 0, w, sigma=sigma, w=w, gs=gs)$value
+  gs_unique <- unique(gs)
+   pbar_unique <- vapply(gs_unique, function(g) {
+     integrate(intergrand, 0, w, sigma = sigma, w = w, gs = g)$value
+   }, 1)
+  pbar <- pbar_unique[match(gs, gs_unique)]
   if (any(!is.finite(pbar)) || any(pbar <= 0)) return(1e10)
   nll <- (-1)*sum(log(p*A/pbar))
   if (!is.finite(nll)) return(1e10)

@@ -58,16 +58,12 @@ sample_sector <- function(points,
                           gr = NULL,
                           ...) {
   # Sample (detect) animals falling within a camera FOV sector.
-  #   points  : data.frame with columns x, y (e.g. from simulate_animals)
+  #   points  : data.frame with columns x, y (e.g. from generate_animals)
   #   origin  : c(x, y) camera location
-  #   bearing : central viewing direction in degrees (0 = +x axis, CCW)
-  #   radius  : detection radius of the sector (w)
+  #   bearing : FOV direction in degrees
+  #   radius  : truncation distance of the sector (w)
   #   angle   : full angular width of the FOV in degrees (split +/- about bearing)
-  #   gr      : optional detection function gr(r, ...) returning P(detect) in
-  #             [0, 1]. When supplied, animals inside the sector are thinned by
-  #             a Bernoulli(gr(r)) draw. When NULL, detection is perfect within
-  #             the sector.
-  #   ...     : additional parameters passed to gr() (e.g. sigma).
+  #   gr      : optional detection function gr(r, ...)
   # Returns detected points with polar coordinates r (distance from camera)
   # and theta (angle relative to bearing, radians), plus the detection
   # probability p when gr is supplied.
@@ -89,8 +85,7 @@ sample_sector <- function(points,
   out$r <- r[inside]
   out$theta <- theta[inside]
 
-
-  # Thin by the detection function: keep each in-view animal with prob gr(r)
+  # detection function:
   if (!is.null(gr)) {
     p <- gr(out$r, ...)
     out$p <- p
@@ -101,6 +96,11 @@ sample_sector <- function(points,
 }
 ##-----------------------------------------------------
 table_counts<- function(counts, dists, breaks) {
+  # function to bin distances
+  # counts : number of animals occuring in FOV (group size)
+  # dists  : distances
+  # breaks : bin endpoints
+  #
   ii<- which(counts > 0)
   c_nonzero<- counts[ii]
   dd<- dists[ii]
@@ -138,9 +138,8 @@ make_bins <- function(dist, breaks, right = FALSE, include_lowest = TRUE) {
 ##----------------------------------------
 fit_detection_hn <- function(dist, w, gs = 1, binned = FALSE, breaks = NULL) {
   # Fit a half-normal detection function to observed sector distances by
-  # conditional MLE (point/sector transect; group size 1). Reuses
-  # nll.cond.point.hn, whose conditional likelihood does not depend on the
-  # sector angle. Returns sigma with an SE on the log scale (from the Hessian).
+  # conditional MLE
+  # Returns sigma with an SE on the log scale (from the Hessian).
   if(binned & ! is.null(breaks)) {
     mle <- optim(
       par = log(w / 2),
@@ -152,7 +151,7 @@ fit_detection_hn <- function(dist, w, gs = 1, binned = FALSE, breaks = NULL) {
     mle <- optim(
       par = log(w / 2),
       fn = nll.cond.point.hn,
-      x = dist, gs = 1, w = w, gs = 1,
+      x = dist, w = w, gs = gs,
       method = "Brent", lower = -5, upper = 5,
       hessian = TRUE)
   }
@@ -166,12 +165,14 @@ fit_detection_hn <- function(dist, w, gs = 1, binned = FALSE, breaks = NULL) {
 
 ##----------------------------------------
 estimate_density_ctds <- function(counts, w, angle, fit, level = 0.95) {
-  # Density from several independent camera sectors of equal area.
-  # counts : per-camera detection counts (length K, may include zeros)
+  # Density from several independent camera sectors of equal area
+  # using design-based appraoch
+  # counts : count of total detections per camera (length K, may include zeros)
   # fit    : output of fit_detection_hn() on the pooled distances
   # Encounter-rate variance is estimated empirically from the cameras
   # counts using Fewster et al: Biometrics (2009)
   # The detection-function variance is added via the delta method.
+
   K <- length(counts)
   if (K < 2) stop("need at least 2 cameras for an empirical variance")
 
@@ -212,32 +213,35 @@ estimate_density_ctds <- function(counts, w, angle, fit, level = 0.95) {
 ##----------------------------------------
 estimate_density_closest <- function(counts, w, angle, fit, level = 0.95) {
   # Density from several independent camera sectors of equal area.
-  # counts : per-camera detection counts (length K, may include zeros)
-  # fit    : output of fit_detection_hn() on the pooled distances
+  # counts : count of total indivdiuals in FOV (=group size: length K, may include zeros)
+  # fit    : output of fit_detection_hn() on the pooled closest distances
   # Encounter-rate variance is estimated empirically from the cameras
   # counts using Fewster et al: Biometrics (2009)
   # The detection-function variance is added via the delta method.
+
   K <- length(counts)
   if (K < 2) stop("need at least 2 cameras for an empirical variance")
 
   n_total <- sum(counts)
-  theta<- angle/360 * pi * w^2
+  theta<- angle/360 * pi * w^2  # sector area
   m <- function(sigma, w, gs) {
     # product of availability, given group size (gs) and detection
     integrate(function(r) availability_cont(r, w, gs) * hn_func(r, sigma), 0 , w)$value
   }
 
   ak<- rep(NA_real_, K)
-  Dk<- rep(NA_real_, K)
+  nk<- rep(NA_real_, K)
   c_nonzero<- counts
   c_nonzero[c_nonzero < 1]<- 1 # Zero counts get group size 1 for areas
 
+  # effective detection probability now depends on group size
   for(k in seq_len(K)) {
-    ak[k] <- theta * m(fit$sigma, w, gs=c_nonzero[k])        # per-camera effective area
-    Dk[k] <- counts[k]/ak[k]
+    ak[k] <- m(fit$sigma, w, gs=c_nonzero[k])
+    nk[k] <- counts[k]/ak[k]
   }
 
-  D<- mean(Dk)
+  D<- sum(nk)/(K * theta)
+
   # Encounter-rate variance (R2)
   R <- mean(counts)
   cv2_er <- sum((counts - R)^2) / (K * (K-1) * R^2)
@@ -270,22 +274,19 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
                      mean_cluster_size = 5, min_total = 10,
                      camera_layout = c("random", "grid"),
                      binned = FALSE, breaks = NULL) {
-  camera_layout <- match.arg(camera_layout)
-  # Simulate one field, survey it with n_cam random cameras, fit and estimate.
+  # Simulate one desnity field, survey it with n_cam cameras, fit and estimate
+  # using standard CTDS method
   # Returns a one-row data.frame, or NULL if too few pooled detections to fit.
-  #D_true<- D_km2/1e6 # D_true is density per m2
+  camera_layout <- match.arg(camera_layout)
+
   n_animals <- round(D_true * width * height)
 
-
-  # animals <- simulate_animals(n_animals, xlim, ylim, distribution,
-  #                             n_clusters = n_clusters, cluster_sd = cluster_sd)
   animals<- generate_animals(width = width,
                              height = height,
                              density = D_true,
                              distribution = distribution,
                              cluster_radius = cluster_radius,
                              mean_cluster_size = mean_cluster_size)
-
 
   # Camera locations, kept >= w from every edge so each sector stays
   # fully inside the region for any bearing (requires region wider than 2w).
@@ -304,12 +305,14 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
     cy <- runif(n_cam, w, height - w)
   }
   #  bearing <- runif(n_cam, 0, 360)
-  bearing <- rep(270, n_cam)
+  bearing <- rep(270, n_cam) ##  All cams facing "south"
 
 
   counts <- integer(n_cam)
   dist_list <- vector("list", n_cam)
   for (k in seq_len(n_cam)) {
+    # the following calls the detection function so only detected individuals
+    # are returned (standard CTDS)
     dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
                         radius = w, angle = fov, gr = hn_func, sigma = sigma_true)
     counts[k] <- nrow(dk)
@@ -323,7 +326,7 @@ sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
     bin_counts<- make_bins(dist, breaks = breaks)
     fit <- fit_detection_hn(bin_counts, w=w, gs=1, binned=TRUE, breaks=breaks)
   } else {
-      fit <- fit_detection_hn(dist, w=w)
+      fit <- fit_detection_hn(dist, w=w, gs=1)
   }
 
   est <- estimate_density_ctds(counts, w = w, angle = fov, fit = fit)
@@ -350,15 +353,14 @@ sim_closest <- function(D_true, sigma_true, w, fov, n_cam, width, height,
                      mean_cluster_size = 5, min_total = 10,
                      camera_layout = c("random", "grid"),
                      binned = FALSE, breaks = NULL) {
-  camera_layout <- match.arg(camera_layout)
+
   # Simulate one field, survey it with n_cam random cameras, fit and estimate.
+  # using closest detection with adjusted availability
   # Returns a one-row data.frame, or NULL if too few pooled detections to fit.
-  #D_true<- D_km2/1e6 # D_true is density per m2
+  camera_layout <- match.arg(camera_layout)
+
   n_animals <- round(D_true * width * height)
 
-
-  # animals <- simulate_animals(n_animals, xlim, ylim, distribution,
-  #                             n_clusters = n_clusters, cluster_sd = cluster_sd)
   animals<- generate_animals(width = width,
                              height = height,
                              density = D_true,
@@ -383,18 +385,20 @@ sim_closest <- function(D_true, sigma_true, w, fov, n_cam, width, height,
     cx <- runif(n_cam, w, width - w)
     cy <- runif(n_cam, w, height - w)
   }
-  #  bearing <- runif(n_cam, 0, 360)
-  bearing <- rep(270, n_cam)
+
+  bearing <- rep(270, n_cam)  ##  All cams facing "south"
 
   counts <- integer(n_cam)
   dist_vec <- rep(NA_real_, n_cam)
   for (k in seq_len(n_cam)) {
+    # the following does not call a detection function so ALL individuals
+    # in the FOV are returned.  Detection is then called on the closest
     dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
                         radius = w, angle = fov)
     if(nrow(dk) == 0L) next
     r_closest <- min(dk$r)
     if (rbinom(1, 1, hn_func(r_closest, sigma_true)) == 1L) {
-      counts[k] <- nrow(dk)
+      counts[k] <- nrow(dk)  # this is now group size
       dist_vec[k] <- r_closest
     }
   }
@@ -406,8 +410,9 @@ sim_closest <- function(D_true, sigma_true, w, fov, n_cam, width, height,
     grps<- tabs$grps
     fit <- fit_detection_hn(bin_counts, w=w, gs=grps, binned=TRUE, breaks=breaks)
   } else {
+    grps<- counts[!is.na(dist_vec)]
     dist <- dist_vec[!is.na(dist_vec)]
-    fit <- fit_detection_hn(dist, w=w)
+    fit <- fit_detection_hn(dist, w=w, gs=grps)
   }
 
   est <- estimate_density_closest(counts, w = w, angle = fov, fit = fit)
@@ -466,7 +471,8 @@ run_density_sim <- function(n_rep = 5,
   out <- bind_rows(res)
   attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
                              w = w, fov = fov, n_cam = n_cam,
-                             distribution = distribution)
+                             distribution = distribution,
+                             model = "CTDS")
   out
 }
 
@@ -509,7 +515,8 @@ run_density_closest <- function(n_rep = 5,
   out <- bind_rows(res)
   attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
                              w = w, fov = fov, n_cam = n_cam,
-                             distribution = distribution)
+                             distribution = distribution,
+                             model = "Closest")
   out
 }
 
@@ -519,22 +526,22 @@ run_density_closest <- function(n_rep = 5,
 summarise_density_sim <- function(res) {
   truth <- attr(res, "truth")
   tibble(
+    Model          = truth$model,
     distribution   = truth$distribution,
     n_cam          = truth$n_cam,
     replicates     = nrow(res),
     D_true         = truth$D_true,
-    mean_Dhat      = mean(res$D),
-    rel_bias       = (mean(res$D) - truth$D_true) / truth$D_true,
-    emp_SD         = sd(res$D),
-    mean_est_SE    = mean(res$se),
+    D_hat          = mean(res$D),
+    bias           = 100 *(mean(res$D) - truth$D_true) / truth$D_true,
+    mean_SE        = mean(res$se),
     mean_cv_enc    = mean(res$cv_encounter),
     mean_cv_det    = mean(res$cv_detection),
-    emp_CV         = sd(res$D)/mean(res$D),
+    mean_CV        = mean(res$se/res$D),
     coverage_95    = mean(res$cover)
   )
 }
 
-
+##----------------------------------------------
 plot_density_sim <- function(res, n_show = 100) {
   truth <- attr(res, "truth")
 
@@ -632,8 +639,7 @@ plot_animals_sectors <- function(animals,
     dplyr::bind_rows()
 
   if (show_detected) {
-    # Flag animals detected by any sector. Track original row ids so the same
-    # animal seen by multiple cameras is not double-counted.
+    # Flag animals occurring within a sector
     animals$.row <- seq_len(nrow(animals))
     detected_rows <- cams |>
       purrr::pmap(\(id, cx, cy, bearing, ...)
@@ -654,7 +660,7 @@ plot_animals_sectors <- function(animals,
       scale_color_manual(values = c(`FALSE` = "grey40", `TRUE` = "firebrick"),
                          labels = c(`FALSE` = "no", `TRUE` = "yes")) +
       scale_alpha_manual(values = c(`FALSE` = 0.3, `TRUE` = 0.9), guide = "none") +
-      labs(color = "detected")
+      labs(color = "Within FOV")
   } else {
     p <- p +
       geom_point(alpha = 0.4, size = 1) +
