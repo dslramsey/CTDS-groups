@@ -201,3 +201,28 @@ nll.cond.binned.hn <- function(parm, counts, gs, breaks){
   return(-sum(nll))
 }
 
+##-----------------------------------------------
+bin_distances_bw <- function(data, bin_width, truncation) {
+  breaks <- seq(0, truncation, by = bin_width)
+
+  data |>
+    dplyr::filter(distance <= truncation) |>
+    dplyr::mutate(
+      distbegin = breaks[findInterval(distance, breaks)],
+      distend   = distbegin + bin_width
+    )
+}
+
+#----------------------------------------------
+
+bin_distances_cut <- function(data, cutpoints) {
+  truncation <- max(cutpoints)
+
+  data |>
+    dplyr::filter(distance <= truncation) |>
+    dplyr::mutate(
+      distbegin = cutpoints[findInterval(distance, cutpoints)],
+      distend   = cutpoints[findInterval(distance, cutpoints) + 1]
+    )
+}
+

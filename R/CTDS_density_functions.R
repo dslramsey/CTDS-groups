@@ -1,5 +1,81 @@
 
 ##-----------------------------------------------
+generate_animals_strata <- function(
+    width,
+    height,
+    densities,
+    distribution = c("uniform", "clustered"),
+    cluster_radius = 5,
+    mean_cluster_size = 10) {
+  # Generate animal locations with density varying across 4 strata.
+  # The region is split into a 2x2 grid (quadrants):
+  #   stratum 1 = bottom-left,  stratum 2 = bottom-right,
+  #   stratum 3 = top-left,     stratum 4 = top-right
+  #
+  # densities : numeric vector of length 4 giving D for each stratum
+
+  distribution <- match.arg(distribution)
+  stopifnot(length(densities) == 4)
+
+  half_w <- width / 2
+  half_h <- height / 2
+
+  # x and y bounds for each stratum
+  strata <- data.frame(
+    stratum = 1:4,
+    xmin = c(0,      half_w, 0,      half_w),
+    xmax = c(half_w, width,  half_w, width),
+    ymin = c(0,      0,      half_h, half_h),
+    ymax = c(half_h, half_h, height, height)
+  )
+
+  strata_area <- half_w * half_h
+  pts_list <- vector("list", 4)
+
+  for (s in 1:4) {
+    N_s <- rpois(1, lambda = densities[s] * strata_area)
+    if (N_s == 0) {
+      pts_list[[s]] <- data.frame(x = numeric(0), y = numeric(0),
+                                  cluster_id = integer(0), stratum = integer(0))
+      next
+    }
+
+    if (distribution == "uniform") {
+      pts_list[[s]] <- data.frame(
+        x = runif(N_s, strata$xmin[s], strata$xmax[s]),
+        y = runif(N_s, strata$ymin[s], strata$ymax[s]),
+        cluster_id = 1L,
+        stratum = s
+      )
+    } else {
+      n_clusters <- max(1, ceiling(N_s / mean_cluster_size))
+      centres <- data.frame(
+        x = runif(n_clusters, strata$xmin[s], strata$xmax[s]),
+        y = runif(n_clusters, strata$ymin[s], strata$ymax[s])
+      )
+      cluster_id <- sample(seq_len(n_clusters), N_s, replace = TRUE)
+      x <- rnorm(N_s, mean = centres$x[cluster_id], sd = cluster_radius)
+      y <- rnorm(N_s, mean = centres$y[cluster_id], sd = cluster_radius)
+
+      # Rejection-sample points outside this stratum
+      outside <- x < strata$xmin[s] | x > strata$xmax[s] |
+                 y < strata$ymin[s] | y > strata$ymax[s]
+      while (any(outside)) {
+        idx <- which(outside)
+        x[idx] <- rnorm(length(idx), centres$x[cluster_id[idx]], cluster_radius)
+        y[idx] <- rnorm(length(idx), centres$y[cluster_id[idx]], cluster_radius)
+        outside <- x < strata$xmin[s] | x > strata$xmax[s] |
+                   y < strata$ymin[s] | y > strata$ymax[s]
+      }
+      pts_list[[s]] <- data.frame(x = x, y = y, cluster_id = cluster_id,
+                                  stratum = s)
+    }
+  }
+
+  do.call(rbind, pts_list)
+}
+
+##-----------------------------------------------
 generate_animals <- function(
     width,
     height,
@@ -49,7 +125,409 @@ generate_animals <- function(
   }
   pts
 }
-##------------------------------------------------
+##---------------------------------------
+## Fit multiple detection functions and return the best by AIC
+##---------------------------------------
+select_best_ds <- function(dist_ds, w, binned = FALSE, breaks = NULL) {
+  # Candidate models: key + adjustment + formula combinations
+  candidates <- list(
+    list(key = "hn",   adjustment = NULL, formula = ~1),
+    list(key = "hn",   adjustment = NULL, formula = ~gs),
+    list(key = "hn",   adjustment = "cos", formula = ~1),
+    list(key = "unif", adjustment = "cos", formula = ~1)
+  )
+
+  fits <- list()
+  aics <- c()
+
+  for (i in seq_along(candidates)) {
+    cand <- candidates[[i]]
+    fit_i <- tryCatch({
+      if (binned && !is.null(breaks)) {
+        dist_ds<- bin_distances_cut(dist_ds, cutpoints = breaks)
+        ds(dist_ds, key = cand$key, adjustment = cand$adjustment,
+           transect = "point", formula = cand$formula)
+      } else {
+        ds(dist_ds, key = cand$key, adjustment = cand$adjustment,
+           transect = "point", truncation = w, formula = cand$formula)
+      }
+    }, error = function(e) NULL)
+
+    if (!is.null(fit_i)) {
+      fits[[length(fits) + 1]] <- fit_i
+      aics <- c(aics, AIC(fit_i)$AIC)
+    }
+  }
+
+  if (length(fits) == 0) stop("All detection function models failed to converge.")
+  fits[[which.min(aics)]]
+}
+
+##---------------------------------------
+## standard CTDS - one replicate (multiple cameras)
+##---------------------------------------
+##---------------------------------------
+## standard CTDS - one replicate (multiple cameras)
+##---------------------------------------
+sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, w, fov,
+                     n_cam, width, height,
+                     distribution = "uniform", perfect_fov = TRUE,
+                     cluster_radius = 30, mean_cluster_size = 5,
+                     min_total = 10, binned = FALSE, breaks = NULL) {
+  require(Distance)
+  animals<- generate_animals(width = width,
+                             height = height,
+                             density = D_true,
+                             distribution = distribution,
+                             cluster_radius = cluster_radius,
+                             mean_cluster_size = mean_cluster_size)
+
+
+  # Camera locations, kept >= w from every edge so each sector stays
+  # fully inside the region for any bearing (requires region wider than 2w).
+  cx <- runif(n_cam, w, width - w)
+  cy <- runif(n_cam, w, height - w)
+
+
+  #  bearing <- runif(n_cam, 0, 360)
+  bearing <- rep(270, n_cam) ##  All cams facing "south"
+
+
+  counts <- integer(n_cam)
+  dist_list <- vector("list", n_cam)
+  for (k in seq_len(n_cam)) {
+
+
+    dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
+                        radius = w, angle = fov)
+    if(nrow(dk) == 0L) {
+      dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
+                                  distance = NA,
+                                  gs=NA,
+                                  size=NA)
+
+
+    } else {
+      dk<- dk[order(dk$r),]
+      nk<- nrow(dk)
+      r_closest <- dk$r[1]
+      if (rbinom(1, 1, hn_func(r_closest, sigma_true)) == 1L) {
+        # Camera triggered by closest individual
+        if(!perfect_fov){
+          # Further animals may be obscured. detection is HN
+          p <- c(1.0, hn_func(dk$r[2:nk], sigma_true)) # r[1] already detected
+          dk<- dk[rbinom(nk, 1, p) == 1, , drop = FALSE]
+          dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
+                                      distance = dk$r,
+                                      gs = nrow(dk),
+                                      size=1)
+        } else {
+          dist_list[[k]] <- data.frame(Sample.Label = paste0("C",k),
+                                       distance = dk$r,
+                                       gs = nrow(dk),
+                                       size=1)
+        }
+      } else {
+        dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
+                                    distance = NA,
+                                    gs=NA,
+                                    size=NA)
+      }
+    }
+  }
+
+
+  dist <- list_rbind(dist_list)
+  dist<- dist |> mutate(object = row_number(), Region.Label = "CTDS",
+                        Effort = 1, Area = 1)
+  dist_ds<- dist |> filter(!is.na(distance))
+
+
+  if (nrow(dist_ds) < min_total) return(NULL)
+
+
+  # Fit multiple detection functions and keep the one with lowest AIC
+  # estimate density using dht2 catching errors
+
+
+  tryCatch({
+    fit <- select_best_ds(dist_ds, w = w, binned = binned, breaks = breaks)
+
+
+    est <- dht2(fit, flatfile = dist, strat_formula = ~1, er_est="P2",
+                sample_fraction = fov/360)
+
+    # CV of the detection function
+    fit_summ <- summary(fit)
+    cv_det <- fit_summ$ds$average.p.se / fit_summ$ds$average.p
+
+
+    data.frame(
+      n_total      = est$n,
+      mean_n       = mean(counts),
+      D            = est$Abundance,
+      se           = est$Abundance_se,
+      cv_encounter = est$ER_CV,
+      cv_detection = cv_det,
+      lcl          = est$LCI,
+      ucl          = est$UCI,
+      cover        = est$LCI <= D_true & D_true <= est$UCI
+    )
+  }, error = function(e) {
+    data.frame(
+      n_total      = sum(counts),
+      mean_n       = mean(counts),
+      D            = NA_real_,
+      se           = NA_real_,
+      cv_encounter = NA_real_,
+      cv_detection = NA_real_,
+      lcl          = NA_real_,
+      ucl          = NA_real_,
+      cover        = NA
+    )
+  })
+}
+
+##---------------------------------------
+## standard CTDS - (time lapse cameras)
+##---------------------------------------
+sim_lapse <- function(D_true, sigma_true, w, fov,
+                     n_cam, width, height,
+                     distribution = "uniform", perfect_fov = TRUE,
+                     cluster_radius = 30, mean_cluster_size = 5,
+                     min_total = 10, binned = FALSE, breaks = NULL) {
+  require(Distance)
+  animals<- generate_animals(width = width,
+                             height = height,
+                             density = D_true,
+                             distribution = distribution,
+                             cluster_radius = cluster_radius,
+                             mean_cluster_size = mean_cluster_size)
+
+  # Camera locations, kept >= w from every edge so each sector stays
+  # fully inside the region for any bearing (requires region wider than 2w).
+  cx <- runif(n_cam, w, width - w)
+  cy <- runif(n_cam, w, height - w)
+
+  #  bearing <- runif(n_cam, 0, 360)
+  bearing <- rep(270, n_cam) ##  All cams facing "south"
+
+  counts <- integer(n_cam)
+  dist_list <- vector("list", n_cam)
+  for (k in seq_len(n_cam)) {
+
+    dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
+                        radius = w, angle = fov)
+    if(nrow(dk) == 0L) {
+      ## no individuals in sector
+      dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
+                                  distance = NA,
+                                  gs=NA,
+                                  size=NA)
+
+    } else if(!perfect_fov){
+          # animals may be obscured. detection is HN
+          nk<- nrow(dk)
+          p <- hn_func(dk$r, sigma_true)
+          dk<- dk[rbinom(nk, 1, p) == 1, , drop = FALSE]
+          if(nrow(dk) >= 1) {
+            dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
+                                        distance = dk$r,
+                                        gs = nrow(dk),
+                                        size=1)
+          } else {
+              dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
+                                          distance = NA,
+                                          gs=NA,
+                                          size=NA)
+          }
+        } else {
+          # No detection error
+          dist_list[[k]] <- data.frame(Sample.Label = paste0("C",k),
+                                       distance = dk$r,
+                                       gs = nrow(dk),
+                                       size=1)
+      }
+  }
+
+  dist <- list_rbind(dist_list)
+  dist<- dist |> mutate(object = row_number(), Region.Label = "CTDS",
+                        Effort = 1, Area = 1)
+  dist_ds<- dist |> filter(!is.na(distance))
+
+  if (nrow(dist_ds) < min_total) return(NULL)
+
+  # Fit multiple detection functions and keep the one with lowest AIC
+  # estimate density using dht2 catching errors
+
+  tryCatch({
+    fit <- select_best_ds(dist_ds, w = w, binned = binned, breaks = breaks)
+
+    est <- dht2(fit, flatfile = dist, strat_formula = ~1, er_est="P2",
+                sample_fraction = fov/360)
+
+    # CV of the detection function
+    fit_summ <- summary(fit)
+    cv_det <- fit_summ$ds$average.p.se / fit_summ$ds$average.p
+
+    data.frame(
+      n_total      = est$n,
+      mean_n       = mean(counts),
+      D            = est$Abundance,
+      se           = est$Abundance_se,
+      cv_encounter = est$ER_CV,
+      cv_detection = cv_det,
+      lcl          = est$LCI,
+      ucl          = est$UCI,
+      cover        = est$LCI <= D_true & D_true <= est$UCI
+    )
+  }, error = function(e) {
+    data.frame(
+      n_total      = sum(counts),
+      mean_n       = mean(counts),
+      D            = NA_real_,
+      se           = NA_real_,
+      cv_encounter = NA_real_,
+      cv_detection = NA_real_,
+      lcl          = NA_real_,
+      ucl          = NA_real_,
+      cover        = NA
+    )
+  })
+}
+##---------------------------------------
+## Closest distance
+##---------------------------------------
+sim_closest <- function(D_true, sigma_closest, sigma_true, w, fov,
+                        n_cam, width, height,
+                        distribution = "uniform", perfect_fov = TRUE,
+                        cluster_radius = 30, mean_cluster_size = 5,
+                        min_total = 10, binned = FALSE, breaks = NULL) {
+
+  animals<- generate_animals(width = width,
+                             height = height,
+                             density = D_true,
+                             distribution = distribution,
+                             cluster_radius = cluster_radius,
+                             mean_cluster_size = mean_cluster_size)
+  # Camera locations, kept >= w from every edge so each sector stays
+  # fully inside the region for any bearing (requires region wider than 2w).
+  cx <- runif(n_cam, w, width - w)
+  cy <- runif(n_cam, w, height - w)
+
+  bearing <- rep(270, n_cam)  ##  All cams facing "south"
+
+  counts <- integer(n_cam)
+  dist_vec <- rep(NA_real_, n_cam)
+  for (k in seq_len(n_cam)) {
+
+    dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
+                        radius = w, angle = fov)
+    if(nrow(dk) == 0L) next
+    dk<- dk[order(dk$r),]
+    r_closest<- dk$r[1]
+    nk<- nrow(dk)
+    if (rbinom(1, 1, hn_func(r_closest, sigma_closest)) == 1L) {
+      # Camera triggered by closest individual
+      if(!perfect_fov){
+        # Further animals may be obscured. detection is HN
+        p <- c(1.0, hn_func(dk$r[2:nk], sigma_true)) # r[1] already detected
+        dk<- dk[rbinom(nk, 1, p) == 1, , drop = FALSE]
+        counts[k]<- nrow(dk) # retain detected for group size
+        dist_vec[k]<- r_closest # for detection function
+      } else {
+        counts[k]<- nrow(dk)
+        dist_vec[k]<- r_closest
+      }
+    }
+  }
+  if (length(dist_vec[!is.na(dist_vec)]) < min_total) return(NULL)
+
+  if(binned & !is.null(breaks)) {
+    tabs<- table_counts(counts, dist_vec, breaks = breaks)
+    bin_counts<- tabs$bin_list
+    grps<- tabs$grps
+    fit <- fit_detection_hn(bin_counts, w=w, gs=grps, binned=TRUE, breaks=breaks)
+  } else {
+    grps<- counts[!is.na(dist_vec)]
+    dist <- dist_vec[!is.na(dist_vec)]
+    fit <- fit_detection_hn(dist, w=w, gs=grps)
+  }
+
+  est <- estimate_density_closest(counts, w = w, angle = fov, fit = fit)
+
+  data.frame(
+    n_total      = est$n,
+    mean_n       = mean(counts),
+    D            = est$D,
+    se           = est$se,
+    cv_encounter = est$cv_encounter,
+    cv_detection = est$cv_detection,
+    lcl          = est$lcl,
+    ucl          = est$ucl,
+    cover        = est$lcl <= D_true & D_true <= est$ucl
+  )
+}
+##---------------------------------------------------------------------
+sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
+                     distribution = "uniform", perfect_fov = TRUE,
+                     cluster_radius = 30, mean_cluster_size = 5, min_total = 10,
+                     binned = FALSE, breaks = NULL) {
+
+  animals<- generate_animals(width = width,
+                             height = height,
+                             density = D_true,
+                             distribution = distribution,
+                             cluster_radius = cluster_radius,
+                             mean_cluster_size = mean_cluster_size)
+
+  # Camera locations, kept >= w from every edge so each sector stays
+  # fully inside the region for any bearing (requires region wider than 2w).
+  cx <- runif(n_cam, w, width - w)
+  cy <- runif(n_cam, w, height - w)
+  #  bearing <- runif(n_cam, 0, 360)
+  bearing <- rep(270, n_cam) ##  All cams facing "south"
+
+  counts <- integer(n_cam)
+  dist_list <- vector("list", n_cam)
+  for (k in seq_len(n_cam)) {
+
+    dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
+                        radius = w, angle = fov, gr = hn_func, sigma = sigma_true)
+    if(nrow(dk) == 0L) next
+    counts[k] <- nrow(dk)  # this is now group size
+    dist_list[[k]] <- dk$r
+
+  }
+
+  dist <- unlist(dist_list)
+  if (length(dist) < min_total) return(NULL)
+
+  if(binned & !is.null(breaks)) {
+    bin_counts<- make_bins(dist, breaks = breaks)
+    fit <- fit_detection_hn(bin_counts, w=w, gs=1, binned=TRUE, breaks=breaks)
+  } else {
+    fit <- fit_detection_hn(dist, w=w, gs=1)
+  }
+
+  est <- estimate_density_ctds(counts, w = w, angle = fov, fit = fit)
+
+  data.frame(
+    n_total      = est$n,
+    mean_n       = mean(counts),
+    D            = est$D,
+    se           = est$se,
+    cv_encounter = est$cv_encounter,
+    cv_detection = est$cv_detection,
+    lcl          = est$lcl,
+    ucl          = est$ucl,
+    cover        = est$lcl <= D_true & D_true <= est$ucl
+  )
+}
+
+
+##--------------------------------------------------------------
+
 sample_sector <- function(points,
                           origin = c(0, 0),
                           bearing = 0,
@@ -117,6 +595,7 @@ table_counts<- function(counts, dists, breaks) {
   }
   list(bin_list=blist, grps=grps)
 }
+
 ##-------------------------------------------------------
 make_bins <- function(dist, breaks, right = FALSE, include_lowest = TRUE) {
   ## bin data keeping site hierarchy
@@ -186,7 +665,7 @@ estimate_density_ctds <- function(counts, w, angle, fit, level = 0.95) {
   a <- theta * m(fit$sigma, w, gs=1)        # per-camera effective area
   D <- n_total / (K * a)
 
-  # Encounter-rate variance (R2)
+  # Encounter-rate variance (P2)
   R <- mean(counts)
   cv2_er <- sum((counts - R)^2) / (K * (K-1) * R^2)
 
@@ -266,187 +745,24 @@ estimate_density_closest <- function(counts, w, angle, fit, level = 0.95) {
   )
 }
 
-##---------------------------------------
-## One replicate (multiple cameras)
-##---------------------------------------
-sim_once <- function(D_true, sigma_true, w, fov, n_cam, width, height,
-                     distribution = "uniform", cluster_radius = 30,
-                     mean_cluster_size = 5, min_total = 10,
-                     camera_layout = c("random", "grid"),
-                     binned = FALSE, breaks = NULL) {
-  # Simulate one desnity field, survey it with n_cam cameras, fit and estimate
-  # using standard CTDS method
-  # Returns a one-row data.frame, or NULL if too few pooled detections to fit.
-  camera_layout <- match.arg(camera_layout)
-
-  n_animals <- round(D_true * width * height)
-
-  animals<- generate_animals(width = width,
-                             height = height,
-                             density = D_true,
-                             distribution = distribution,
-                             cluster_radius = cluster_radius,
-                             mean_cluster_size = mean_cluster_size)
-
-  # Camera locations, kept >= w from every edge so each sector stays
-  # fully inside the region for any bearing (requires region wider than 2w).
-  if (camera_layout == "grid") {
-    # Build a near-square grid of >= n_cam points within the interior, spaced
-    # evenly and inset by w from each edge, then take the first n_cam of them.
-    n_col <- ceiling(sqrt(n_cam * (width - 2 * w) / (height - 2 * w)))
-    n_row <- ceiling(n_cam / n_col)
-    gx <- seq(w, width - w, length.out = n_col)
-    gy <- seq(w, height - w, length.out = n_row)
-    grid <- expand.grid(x = gx, y = gy)[seq_len(n_cam), ]
-    cx <- grid$x
-    cy <- grid$y
-  } else {
-    cx <- runif(n_cam, w, width - w)
-    cy <- runif(n_cam, w, height - w)
-  }
-  #  bearing <- runif(n_cam, 0, 360)
-  bearing <- rep(270, n_cam) ##  All cams facing "south"
-
-
-  counts <- integer(n_cam)
-  dist_list <- vector("list", n_cam)
-  for (k in seq_len(n_cam)) {
-    # the following calls the detection function so only detected individuals
-    # are returned (standard CTDS)
-    dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
-                        radius = w, angle = fov, gr = hn_func, sigma = sigma_true)
-    counts[k] <- nrow(dk)
-    dist_list[[k]] <- dk$r
-  }
-
-  dist <- unlist(dist_list)
-  if (length(dist) < min_total) return(NULL)
-
-  if(binned & !is.null(breaks)) {
-    bin_counts<- make_bins(dist, breaks = breaks)
-    fit <- fit_detection_hn(bin_counts, w=w, gs=1, binned=TRUE, breaks=breaks)
-  } else {
-      fit <- fit_detection_hn(dist, w=w, gs=1)
-  }
-
-  est <- estimate_density_ctds(counts, w = w, angle = fov, fit = fit)
-
-  data.frame(
-    n_total      = est$n,
-    mean_n       = mean(counts),
-    sigma        = fit$sigma,
-    D            = est$D,
-    se           = est$se,
-    cv_encounter = est$cv_encounter,
-    cv_detection = est$cv_detection,
-    lcl          = est$lcl,
-    ucl          = est$ucl,
-    cover        = est$lcl <= D_true & D_true <= est$ucl
-  )
-}
-
-##---------------------------------------
-## Closest distance
-##---------------------------------------
-sim_closest <- function(D_true, sigma_true, w, fov, n_cam, width, height,
-                     distribution = "uniform", cluster_radius = 30,
-                     mean_cluster_size = 5, min_total = 10,
-                     camera_layout = c("random", "grid"),
-                     binned = FALSE, breaks = NULL) {
-
-  # Simulate one field, survey it with n_cam random cameras, fit and estimate.
-  # using closest detection with adjusted availability
-  # Returns a one-row data.frame, or NULL if too few pooled detections to fit.
-  camera_layout <- match.arg(camera_layout)
-
-  n_animals <- round(D_true * width * height)
-
-  animals<- generate_animals(width = width,
-                             height = height,
-                             density = D_true,
-                             distribution = distribution,
-                             cluster_radius = cluster_radius,
-                             mean_cluster_size = mean_cluster_size)
-
-
-  # Camera locations, kept >= w from every edge so each sector stays
-  # fully inside the region for any bearing (requires region wider than 2w).
-  if (camera_layout == "grid") {
-    # Build a near-square grid of >= n_cam points within the interior, spaced
-    # evenly and inset by w from each edge, then take the first n_cam of them.
-    n_col <- ceiling(sqrt(n_cam * (width - 2 * w) / (height - 2 * w)))
-    n_row <- ceiling(n_cam / n_col)
-    gx <- seq(w, width - w, length.out = n_col)
-    gy <- seq(w, height - w, length.out = n_row)
-    grid <- expand.grid(x = gx, y = gy)[seq_len(n_cam), ]
-    cx <- grid$x
-    cy <- grid$y
-  } else {
-    cx <- runif(n_cam, w, width - w)
-    cy <- runif(n_cam, w, height - w)
-  }
-
-  bearing <- rep(270, n_cam)  ##  All cams facing "south"
-
-  counts <- integer(n_cam)
-  dist_vec <- rep(NA_real_, n_cam)
-  for (k in seq_len(n_cam)) {
-    # the following does not call a detection function so ALL individuals
-    # in the FOV are returned.  Detection is then called on the closest
-    dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
-                        radius = w, angle = fov)
-    if(nrow(dk) == 0L) next
-    r_closest <- min(dk$r)
-    if (rbinom(1, 1, hn_func(r_closest, sigma_true)) == 1L) {
-      counts[k] <- nrow(dk)  # this is now group size
-      dist_vec[k] <- r_closest
-    }
-  }
-  if (length(dist_vec[!is.na(dist_vec)]) < min_total) return(NULL)
-
-  if(binned & !is.null(breaks)) {
-    tabs<- table_counts(counts, dist_vec, breaks = breaks)
-    bin_counts<- tabs$bin_list
-    grps<- tabs$grps
-    fit <- fit_detection_hn(bin_counts, w=w, gs=grps, binned=TRUE, breaks=breaks)
-  } else {
-    grps<- counts[!is.na(dist_vec)]
-    dist <- dist_vec[!is.na(dist_vec)]
-    fit <- fit_detection_hn(dist, w=w, gs=grps)
-  }
-
-  est <- estimate_density_closest(counts, w = w, angle = fov, fit = fit)
-
-  data.frame(
-    n_total      = est$n,
-    mean_n       = mean(counts),
-    sigma        = fit$sigma,
-    D            = est$D,
-    se           = est$se,
-    cv_encounter = est$cv_encounter,
-    cv_detection = est$cv_detection,
-    lcl          = est$lcl,
-    ucl          = est$ucl,
-    cover        = est$lcl <= D_true & D_true <= est$ucl
-  )
-}
 
 
 ##---------------------------------------
-## Many replicates
+## standard CTDS with closest distance trigger
 ##---------------------------------------
 run_density_sim <- function(n_rep = 5,
                             D_true = 0.01,
-                            sigma_true = 4,
+                            sigma_closest = 4,
+                            sigma_true= 12,
                             w = 12,
                             fov = 40,
+                            perfect_fov = FALSE,
                             n_cam = 60,
                             width = 500,
                             height = 500,
                             distribution = c("uniform", "clustered"),
                             cluster_radius = 30,
                             mean_cluster_size = 5,
-                            camera_layout = c("random", "grid"),
                             binned = FALSE,
                             breaks = NULL,
                             progress = TRUE) {
@@ -454,15 +770,15 @@ run_density_sim <- function(n_rep = 5,
   # estimated across those cameras. Under clustering the empirical variance
   # captures over-dispersion, so CI coverage should recover toward nominal.
   distribution <- match.arg(distribution)
-  camera_layout <- match.arg(camera_layout)
   res <- vector("list", n_rep)
   pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
   for (i in seq_len(n_rep)) {
-    res[[i]] <- sim_once(D_true, sigma_true, w, fov, n_cam, width, height,
+    res[[i]] <- sim_ctds(D_true, sigma_closest, sigma_true, w, fov,
+                         n_cam, width, height,
                          distribution = distribution,
+                         perfect_fov = perfect_fov,
                          cluster_radius = cluster_radius,
                          mean_cluster_size = mean_cluster_size,
-                         camera_layout = camera_layout,
                          binned = binned,
                          breaks = breaks)
     if (progress) utils::setTxtProgressBar(pb, i)
@@ -477,20 +793,21 @@ run_density_sim <- function(n_rep = 5,
 }
 
 ##---------------------------------------
-## Many replicates
+## closest distance only with group size adjustment
 ##---------------------------------------
 run_density_closest <- function(n_rep = 5,
                             D_true = 0.01,
-                            sigma_true = 4,
-                            w = 12,
+                            sigma_closest = 4,
+                            sigma_true = 12,
+                            w = 15,
                             fov = 40,
+                            perfect_fov = FALSE,
                             n_cam = 60,
                             width = 500,
                             height = 500,
                             distribution = c("uniform", "clustered"),
                             cluster_radius = 30,
                             mean_cluster_size = 5,
-                            camera_layout = c("random", "grid"),
                             binned = FALSE,
                             breaks = NULL,
                             progress = TRUE) {
@@ -498,15 +815,15 @@ run_density_closest <- function(n_rep = 5,
   # estimated across those cameras. Under clustering the empirical variance
   # captures over-dispersion, so CI coverage should recover toward nominal.
   distribution <- match.arg(distribution)
-  camera_layout <- match.arg(camera_layout)
   res <- vector("list", n_rep)
   pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
   for (i in seq_len(n_rep)) {
-    res[[i]] <- sim_closest(D_true, sigma_true, w, fov, n_cam, width, height,
+    res[[i]] <- sim_closest(D_true, sigma_closest, sigma_true, w, fov,
+                            n_cam, width, height,
                             distribution = distribution,
+                            perfect_fov = perfect_fov,
                             cluster_radius = cluster_radius,
                             mean_cluster_size = mean_cluster_size,
-                            camera_layout = camera_layout,
                             binned = binned,
                             breaks = breaks)
     if (progress) utils::setTxtProgressBar(pb, i)
@@ -519,6 +836,49 @@ run_density_closest <- function(n_rep = 5,
                              model = "Closest")
   out
 }
+##---------------------------------------
+## standard CTDS with time lapse (no sensor)
+##---------------------------------------
+run_density_lapse <- function(n_rep = 5,
+                                D_true = 0.01,
+                                sigma_true = 12,
+                                w = 15,
+                                fov = 40,
+                                perfect_fov = FALSE,
+                                n_cam = 60,
+                                width = 500,
+                                height = 500,
+                                distribution = c("uniform", "clustered"),
+                                cluster_radius = 30,
+                                mean_cluster_size = 5,
+                                binned = FALSE,
+                                breaks = NULL,
+                                progress = TRUE) {
+  # Each replicate places n_cam random cameras; the encounter-rate variance is
+  # estimated across those cameras. Under clustering the empirical variance
+  # captures over-dispersion, so CI coverage should recover toward nominal.
+  distribution <- match.arg(distribution)
+  res <- vector("list", n_rep)
+  pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
+  for (i in seq_len(n_rep)) {
+    res[[i]] <- sim_lapse(D_true, sigma_true, w, fov,
+                            n_cam, width, height,
+                            distribution = distribution,
+                            perfect_fov = perfect_fov,
+                            cluster_radius = cluster_radius,
+                            mean_cluster_size = mean_cluster_size,
+                            binned = binned,
+                            breaks = breaks)
+    if (progress) utils::setTxtProgressBar(pb, i)
+  }
+  if (progress) close(pb)
+  out <- bind_rows(res)
+  attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
+                             w = w, fov = fov, n_cam = n_cam,
+                             distribution = distribution,
+                             model = "lapse")
+  out
+}
 
 ##---------------------------------------
 ## Summaries and plots
@@ -529,15 +889,15 @@ summarise_density_sim <- function(res) {
     Model          = truth$model,
     distribution   = truth$distribution,
     n_cam          = truth$n_cam,
-    replicates     = nrow(res),
+    replicates     = length(res$D[!is.na(res$D)]),
     D_true         = truth$D_true,
-    D_hat          = mean(res$D),
-    bias           = 100 *(mean(res$D) - truth$D_true) / truth$D_true,
-    mean_SE        = mean(res$se),
-    mean_cv_enc    = mean(res$cv_encounter),
-    mean_cv_det    = mean(res$cv_detection),
-    mean_CV        = mean(res$se/res$D),
-    coverage_95    = mean(res$cover)
+    D_hat          = mean(res$D, na.rm=TRUE),
+    bias           = 100 *(mean(res$D, na.rm=TRUE) - truth$D_true) / truth$D_true,
+    mean_SE        = mean(res$se, na.rm=TRUE),
+    mean_cv_enc    = mean(res$cv_encounter, na.rm=TRUE),
+    mean_cv_det    = mean(res$cv_detection, na.rm=TRUE),
+    mean_CV        = mean(res$se/res$D, na.rm=TRUE),
+    coverage_95    = mean(res$cover,na.rm=TRUE)
   )
 }
 
@@ -616,18 +976,20 @@ plot_animals_sectors <- function(animals,
                                  width = NULL,
                                  height = NULL,
                                  show_detected = FALSE,
+                                 detected_color = "firebrick",
                                  gr = NULL,
                                  ...) {
   # Plot a 2D animal point pattern with a set of camera FOV sectors overlaid.
-  #   animals : data.frame with columns x, y (e.g. from generate_animals)
-  #   cams    : data.frame with columns cx, cy, bearing (one row per camera);
-  #             an id column is added if absent
-  #   radius  : sector detection radius (w); angle: full FOV width in degrees
-  #   width, height : optional plot limits (defaults to the animal extent)
-  #   show_detected : when TRUE, animals falling inside any sector are coloured.
-  #             Detection is assessed with sample_sector() using the same
-  #             geometry; pass gr (and its params via ...) to thin by a
-  #             detection function, otherwise detection is perfect within view.
+  #   animals        : data.frame with columns x, y (e.g. from generate_animals)
+  #   cams           : data.frame with columns cx, cy, bearing (one row per camera);
+  #                    an id column is added if absent
+  #   radius         : sector detection radius (w); angle: full FOV width in degrees
+  #   width, height  : optional plot limits (defaults to the animal extent)
+  #   show_detected  : when TRUE, animals falling inside any sector are coloured.
+  #                    Detection is assessed with sample_sector() using the same
+  #                    geometry; pass gr (and its params via ...) to thin by a
+  #                    detection function, otherwise detection is perfect within view.
+  #   detected_color : colour used for detected animals, sector fill, and camera points.
   if (is.null(cams$id)) cams$id <- seq_len(nrow(cams))
   if (is.null(width))  width  <- max(animals$x)
   if (is.null(height)) height <- max(animals$y)
@@ -655,9 +1017,9 @@ plot_animals_sectors <- function(animals,
   if (show_detected) {
     p <- p +
       geom_polygon(data = sectors, aes(group = id),
-                   fill = "firebrick", alpha = 0.15, color = "firebrick") +
+                   fill = detected_color, alpha = 0.15, color = detected_color) +
       geom_point(aes(color = detected, alpha = detected), size = 1) +
-      scale_color_manual(values = c(`FALSE` = "grey40", `TRUE` = "firebrick"),
+      scale_color_manual(values = c(`FALSE` = "grey40", `TRUE` = detected_color),
                          labels = c(`FALSE` = "no", `TRUE` = "yes")) +
       scale_alpha_manual(values = c(`FALSE` = 0.3, `TRUE` = 0.9), guide = "none") +
       labs(color = "Within FOV")
@@ -665,13 +1027,14 @@ plot_animals_sectors <- function(animals,
     p <- p +
       geom_point(alpha = 0.4, size = 1) +
       geom_polygon(data = sectors, aes(group = id),
-                   fill = "firebrick", alpha = 0.3, color = "firebrick")
+                   fill = detected_color, alpha = 0.3, color = detected_color)
   }
 
   p +
-    geom_point(data = cams, aes(cx, cy), color = "firebrick", size = 1.5) +
+    geom_point(data = cams, aes(cx, cy), color = detected_color, size = 1.5) +
     coord_equal(xlim = c(0, width), ylim = c(0, height)) +
     labs(title = "Animal distribution with camera sectors",
          x = "x (m)", y = "y (m)") +
     theme_bw()
 }
+

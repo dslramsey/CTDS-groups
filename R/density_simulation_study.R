@@ -9,6 +9,7 @@
 
 library(tidyverse)
 library(patchwork)
+library(Distance)
 
 source("R/group_size_funcs.R")
 source("R/CTDS_density_functions.R")
@@ -17,53 +18,71 @@ source("R/CTDS_density_functions.R")
 ##---------------------------------------
 ## Uniform density field
 ##---------------------------------------
-n_rep<- 1000   # increase for better inference
-D<- 0.01
+n_rep<- 500   # increase for better inference
+D<- 0.2
 ncams<- 200
 fov<- 40
 w<- 15
-sigma_true<- 5
+sigma_closest<- 4
+sigma_true<- 12
+perfect_fov<- FALSE
 bearing <- 270
 width<- 500
 height<- 500
 clus_rad <- 5
-clus_size<- 10
-cam_layout<- "grid"
+clus_size<- 30
 
 delta<- 2.5
 bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 
   res_unif <- run_density_sim(n_rep = n_rep,
                               D_true = D,
+                              sigma_closest = sigma_closest,
                               sigma_true = sigma_true,
                               w = w,
                               fov = fov,
+                              perfect_fov = perfect_fov,
                               n_cam = ncams,
                               width = width,
                               height = height,
                               distribution = "uniform",
-                              camera_layout =  cam_layout,
                               cluster_radius = clus_rad,
                               mean_cluster_size =  clus_size,
                               binned = FALSE,
                               breaks = NULL)
 
+  summarise_density_sim(res_unif)
+
   res_unif_cl <- run_density_closest(n_rep = n_rep,
                                   D_true = D,
+                                  sigma_closest = sigma_closest,
                                   sigma_true = sigma_true,
                                   w = w,
                                   fov = fov,
+                                  perfect_fov = perfect_fov,
                                   n_cam = ncams,
                                   width = width,
                                   height = height,
                                   distribution = "uniform",
-                                  camera_layout =  cam_layout,
                                   cluster_radius = clus_rad,
                                   mean_cluster_size =  clus_size,
                                   binned = FALSE,
                                   breaks = NULL)
 
-
+  res_unif_lps <- run_density_lapse(n_rep = n_rep,
+                                     D_true = D,
+                                     sigma_true = sigma_true,
+                                     w = w,
+                                     fov = fov,
+                                     perfect_fov = perfect_fov,
+                                     n_cam = ncams,
+                                     width = width,
+                                     height = height,
+                                     distribution = "uniform",
+                                     cluster_radius = clus_rad,
+                                     mean_cluster_size =  clus_size,
+                                     binned = FALSE,
+                                     breaks = NULL)
 
   print(bind_rows(
     summarise_density_sim(res_unif),
@@ -81,38 +100,55 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
   ##---------------------------------------
   res_clus <- run_density_sim(n_rep = n_rep,
                               D_true = D,
+                              sigma_closest = sigma_closest,
                               sigma_true = sigma_true,
                               w = w,
                               fov = fov,
+                              perfect_fov = perfect_fov,
                               n_cam = ncams,
                               width = width,
                               height = height,
                               distribution = "clustered",
-                              camera_layout = cam_layout,
                               cluster_radius = clus_rad,
                               mean_cluster_size =  clus_size,
                               binned = FALSE,
                               breaks = NULL)
 
   res_clus_cl <- run_density_closest(n_rep = n_rep,
-                              D_true = D,
-                              sigma_true = sigma_true,
-                              w = w,
-                              fov = fov,
-                              n_cam = ncams,
-                              width = width,
-                              height = height,
-                              distribution = "clustered",
-                              camera_layout = cam_layout,
-                              cluster_radius = clus_rad,
-                              mean_cluster_size =  clus_size,
-                              binned = FALSE,
-                              breaks = NULL)
+                                     D_true = D,
+                                     sigma_closest = sigma_closest,
+                                     sigma_true = sigma_true,
+                                     w = w,
+                                     fov = fov,
+                                     perfect_fov = perfect_fov,
+                                     n_cam = ncams,
+                                     width = width,
+                                     height = height,
+                                     distribution = "clustered",
+                                     cluster_radius = clus_rad,
+                                     mean_cluster_size =  clus_size,
+                                     binned = FALSE,
+                                     breaks = NULL)
 
+  res_clus_lps <- run_density_lapse(n_rep = n_rep,
+                                     D_true = D,
+                                     sigma_true = sigma_true,
+                                     w = w,
+                                     fov = fov,
+                                     perfect_fov = perfect_fov,
+                                     n_cam = ncams,
+                                     width = width,
+                                     height = height,
+                                     distribution = "clustered",
+                                     cluster_radius = clus_rad,
+                                     mean_cluster_size =  clus_size,
+                                     binned = FALSE,
+                                     breaks = NULL)
 
   print(bind_rows(
     summarise_density_sim(res_clus),
-    summarise_density_sim(res_clus_cl)
+    summarise_density_sim(res_clus_cl),
+    summarise_density_sim(res_clus_lps)
   ))
 
   win.graph(10,10)
@@ -127,9 +163,9 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
   animals<- generate_animals(width = width,
                              height = height,
                              density = D,
-                             distribution = "uniform",
+                             distribution = "clustered",
                              cluster_radius = 5,
-                             mean_cluster_size = 10)
+                             mean_cluster_size = 20)
 
   cams<- generate_cam_locs(ncams, w, width, height, bearing, cam_layout)
 
