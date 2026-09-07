@@ -1,79 +1,5 @@
 
-##-----------------------------------------------
-generate_animals_strata <- function(
-    width,
-    height,
-    densities,
-    distribution = c("uniform", "clustered"),
-    cluster_radius = 5,
-    mean_cluster_size = 10) {
-  # Generate animal locations with density varying across 4 strata.
-  # The region is split into a 2x2 grid (quadrants):
-  #   stratum 1 = bottom-left,  stratum 2 = bottom-right,
-  #   stratum 3 = top-left,     stratum 4 = top-right
-  #
-  # densities : numeric vector of length 4 giving D for each stratum
-
-  distribution <- match.arg(distribution)
-  stopifnot(length(densities) == 4)
-
-  half_w <- width / 2
-  half_h <- height / 2
-
-  # x and y bounds for each stratum
-  strata <- data.frame(
-    stratum = 1:4,
-    xmin = c(0,      half_w, 0,      half_w),
-    xmax = c(half_w, width,  half_w, width),
-    ymin = c(0,      0,      half_h, half_h),
-    ymax = c(half_h, half_h, height, height)
-  )
-
-  strata_area <- half_w * half_h
-  pts_list <- vector("list", 4)
-
-  for (s in 1:4) {
-    N_s <- rpois(1, lambda = densities[s] * strata_area)
-    if (N_s == 0) {
-      pts_list[[s]] <- data.frame(x = numeric(0), y = numeric(0),
-                                  cluster_id = integer(0), stratum = integer(0))
-      next
-    }
-
-    if (distribution == "uniform") {
-      pts_list[[s]] <- data.frame(
-        x = runif(N_s, strata$xmin[s], strata$xmax[s]),
-        y = runif(N_s, strata$ymin[s], strata$ymax[s]),
-        cluster_id = 1L,
-        stratum = s
-      )
-    } else {
-      n_clusters <- max(1, ceiling(N_s / mean_cluster_size))
-      centres <- data.frame(
-        x = runif(n_clusters, strata$xmin[s], strata$xmax[s]),
-        y = runif(n_clusters, strata$ymin[s], strata$ymax[s])
-      )
-      cluster_id <- sample(seq_len(n_clusters), N_s, replace = TRUE)
-      x <- rnorm(N_s, mean = centres$x[cluster_id], sd = cluster_radius)
-      y <- rnorm(N_s, mean = centres$y[cluster_id], sd = cluster_radius)
-
-      # Rejection-sample points outside this stratum
-      outside <- x < strata$xmin[s] | x > strata$xmax[s] |
-                 y < strata$ymin[s] | y > strata$ymax[s]
-      while (any(outside)) {
-        idx <- which(outside)
-        x[idx] <- rnorm(length(idx), centres$x[cluster_id[idx]], cluster_radius)
-        y[idx] <- rnorm(length(idx), centres$y[cluster_id[idx]], cluster_radius)
-        outside <- x < strata$xmin[s] | x > strata$xmax[s] |
-                   y < strata$ymin[s] | y > strata$ymax[s]
-      }
-      pts_list[[s]] <- data.frame(x = x, y = y, cluster_id = cluster_id,
-                                  stratum = s)
-    }
-  }
-
-  do.call(rbind, pts_list)
-}
+library(numDeriv)
 
 ##-----------------------------------------------
 generate_animals <- function(
@@ -129,11 +55,13 @@ generate_animals <- function(
 ## Fit multiple detection functions and return the best by AIC
 ##---------------------------------------
 select_best_ds <- function(dist_ds, w, binned = FALSE, breaks = NULL) {
+  # Fit detection functions to distance data using ds() in the Distance package
+  # cycle through candidate models and select best using AIC
   # Candidate models: key + adjustment + formula combinations
   candidates <- list(
-    list(key = "hn",   adjustment = NULL, formula = ~1),
-    list(key = "hn",   adjustment = NULL, formula = ~gs),
     list(key = "hn",   adjustment = "cos", formula = ~1),
+    list(key = "hn",   adjustment = NULL, formula = ~gs),
+    list(key = "hr",   adjustment = "cos", formula = ~1),
     list(key = "unif", adjustment = "cos", formula = ~1)
   )
 
@@ -166,9 +94,6 @@ select_best_ds <- function(dist_ds, w, binned = FALSE, breaks = NULL) {
 ##---------------------------------------
 ## standard CTDS - one replicate (multiple cameras)
 ##---------------------------------------
-##---------------------------------------
-## standard CTDS - one replicate (multiple cameras)
-##---------------------------------------
 sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, w, fov,
                      n_cam, width, height,
                      distribution = "uniform", perfect_fov = TRUE,
@@ -182,7 +107,6 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, w, fov,
                              cluster_radius = cluster_radius,
                              mean_cluster_size = mean_cluster_size)
 
-
   # Camera locations, kept >= w from every edge so each sector stays
   # fully inside the region for any bearing (requires region wider than 2w).
   cx <- runif(n_cam, w, width - w)
@@ -192,11 +116,9 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, w, fov,
   #  bearing <- runif(n_cam, 0, 360)
   bearing <- rep(270, n_cam) ##  All cams facing "south"
 
-
   counts <- integer(n_cam)
   dist_list <- vector("list", n_cam)
   for (k in seq_len(n_cam)) {
-
 
     dk <- sample_sector(animals, origin = c(cx[k], cy[k]), bearing = bearing[k],
                         radius = w, angle = fov)
@@ -221,11 +143,13 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, w, fov,
                                       distance = dk$r,
                                       gs = nrow(dk),
                                       size=1)
+          counts[k]<- nrow(dk)
         } else {
           dist_list[[k]] <- data.frame(Sample.Label = paste0("C",k),
                                        distance = dk$r,
                                        gs = nrow(dk),
                                        size=1)
+          counts[k]<- nrow(dk)
         }
       } else {
         dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
@@ -245,11 +169,6 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, w, fov,
 
   if (nrow(dist_ds) < min_total) return(NULL)
 
-
-  # Fit multiple detection functions and keep the one with lowest AIC
-  # estimate density using dht2 catching errors
-
-
   tryCatch({
     fit <- select_best_ds(dist_ds, w = w, binned = binned, breaks = breaks)
 
@@ -260,7 +179,6 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, w, fov,
     # CV of the detection function
     fit_summ <- summary(fit)
     cv_det <- fit_summ$ds$average.p.se / fit_summ$ds$average.p
-
 
     data.frame(
       n_total      = est$n,
@@ -335,6 +253,7 @@ sim_lapse <- function(D_true, sigma_true, w, fov,
                                         distance = dk$r,
                                         gs = nrow(dk),
                                         size=1)
+            counts[k]<- nrow(dk)
           } else {
               dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
                                           distance = NA,
@@ -347,6 +266,7 @@ sim_lapse <- function(D_true, sigma_true, w, fov,
                                        distance = dk$r,
                                        gs = nrow(dk),
                                        size=1)
+          counts[k]<- nrow(dk)
       }
   }
 
@@ -667,13 +587,14 @@ estimate_density_ctds <- function(counts, w, angle, fit, level = 0.95) {
 
   # Encounter-rate variance (P2)
   R <- mean(counts)
-  cv2_er <- sum((counts - R)^2) / (K * (K-1) * R^2)
+  var_er <- sum((counts - R)^2) / (K * (K-1))
+  cv2_er<- var_er/R^2
 
   # Detection-function variance (delta method)
-  h <- (abs(fit$log_sigma) + 1) * 1e-6
-  gradient <- (log(theta * m(exp(fit$log_sigma + h), w, 1)) -
-              log(theta * m(exp(fit$log_sigma - h), w, 1))) / (2 * h)
-  cv2_det <- (gradient * fit$se_log_sigma)^2
+  pbar_fun <- function(lsigma, w){m(exp(lsigma), w, 1)}
+  gradient <- numDeriv::grad(pbar_fun, x = fit$log_sigma, w = w)
+  se_det <- gradient * fit$se_log_sigma
+  cv2_det <- (se_det/m(fit$sigma,w,gs=1))^2
 
   cv2 <- cv2_er + cv2_det
   se_D <- D * sqrt(cv2)
@@ -723,13 +644,14 @@ estimate_density_closest <- function(counts, w, angle, fit, level = 0.95) {
 
   # Encounter-rate variance (R2)
   R <- mean(counts)
-  cv2_er <- sum((counts - R)^2) / (K * (K-1) * R^2)
+  var_er <- sum((counts - R)^2) / (K * (K-1))
+  cv2_er<- var_er/R^2
 
   # Detection-function variance (delta method)
-  h <- (abs(fit$log_sigma) + 1) * 1e-6
-  gradient <- (log(theta * m(exp(fit$log_sigma + h), w, 1)) -
-                 log(theta * m(exp(fit$log_sigma - h), w, 1))) / (2 * h)
-  cv2_det <- (gradient * fit$se_log_sigma)^2
+  pbar_fun <- function(lsigma, w){m(exp(lsigma), w, 1)}
+  gradient <- numDeriv::grad(pbar_fun, x = fit$log_sigma, w = w)
+  se_det <- gradient * fit$se_log_sigma
+  cv2_det <- (se_det/m(fit$sigma,w,gs=1))^2
 
   cv2 <- cv2_er + cv2_det
   se_D <- D * sqrt(cv2)

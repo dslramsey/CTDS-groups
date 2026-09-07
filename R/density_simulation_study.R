@@ -11,6 +11,7 @@ library(tidyverse)
 library(patchwork)
 library(Distance)
 
+
 source("R/group_size_funcs.R")
 source("R/CTDS_density_functions.R")
 
@@ -19,7 +20,7 @@ source("R/CTDS_density_functions.R")
 ## Uniform density field
 ##---------------------------------------
 n_rep<- 500   # increase for better inference
-D<- 0.2
+D<- 0.1
 ncams<- 200
 fov<- 40
 w<- 15
@@ -86,7 +87,8 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 
   print(bind_rows(
     summarise_density_sim(res_unif),
-    summarise_density_sim(res_unif_cl)
+    summarise_density_sim(res_unif_cl),
+    summarise_density_sim(res_unif_lps)
   ))
 
   win.graph(10,10)
@@ -160,14 +162,25 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 ##-----------------------------------------------------------------
 ##  plot a single density realisation
 ##-----------------------------------------------------------------
+
+  D<- 0.001
+  ncams<- 200
+  fov<- 40
+  w<- 15
+  bearing <- 270
+  width<- 500
+  height<- 500
+  clus_rad <- 50
+  clus_size<- 5
+
   animals<- generate_animals(width = width,
                              height = height,
                              density = D,
-                             distribution = "clustered",
+                             distribution = "uniform",
                              cluster_radius = 5,
                              mean_cluster_size = 20)
 
-  cams<- generate_cam_locs(ncams, w, width, height, bearing, cam_layout)
+  cams<- generate_cam_locs(ncams, w, width, height, bearing, camera_layout="random")
 
   win.graph(10,10)
   plot_animals_sectors(animals, cams, radius = w, angle = fov,
@@ -175,8 +188,4 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                        show_detected = TRUE)
 
 
-  dd<- seq(0,15,0.1)
-  pp<- hn_func(dd, 13)
-  win.graph(7,7)
-  plot(dd,pp, type="l", ylim=c(0,1))
 

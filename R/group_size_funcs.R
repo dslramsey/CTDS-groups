@@ -226,3 +226,10 @@ bin_distances_cut <- function(data, cutpoints) {
     )
 }
 
+calc_er<- function(counts) {
+  K<- length(counts)
+  R<- mean(counts)
+  var_er <- sum((counts - R)^2) / (K * (K-1))
+  cv<- sqrt(var_er)/R
+  cv
+}
