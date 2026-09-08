@@ -26,6 +26,7 @@ fov<- 40
 w<- 15
 sigma_closest<- 4
 sigma_true<- 12
+MCDS <- TRUE
 perfect_fov<- FALSE
 bearing <- 270
 width<- 500
@@ -36,10 +37,11 @@ clus_size<- 30
 delta<- 2.5
 bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 
-  res_unif <- run_density_sim(n_rep = n_rep,
+  res_unif <- run_density_ctds(n_rep = n_rep,
                               D_true = D,
                               sigma_closest = sigma_closest,
                               sigma_true = sigma_true,
+                              MCDS = MCDS,
                               w = w,
                               fov = fov,
                               perfect_fov = perfect_fov,
@@ -69,6 +71,8 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                                   mean_cluster_size =  clus_size,
                                   binned = FALSE,
                                   breaks = NULL)
+
+  summarise_density_sim(res_unif_cl)
 
   res_unif_lps <- run_density_lapse(n_rep = n_rep,
                                      D_true = D,
@@ -163,22 +167,22 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 ##  plot a single density realisation
 ##-----------------------------------------------------------------
 
-  D<- 0.001
-  ncams<- 200
+  D<- 0.1
+  ncams<- 10
   fov<- 40
   w<- 15
   bearing <- 270
   width<- 500
   height<- 500
-  clus_rad <- 50
-  clus_size<- 5
+  clus_rad <- 5
+  clus_size<- 30
 
   animals<- generate_animals(width = width,
                              height = height,
                              density = D,
-                             distribution = "uniform",
-                             cluster_radius = 5,
-                             mean_cluster_size = 20)
+                             distribution = "clustered",
+                             cluster_radius = clus_rad,
+                             mean_cluster_size = clus_size)
 
   cams<- generate_cam_locs(ncams, w, width, height, bearing, camera_layout="random")
 

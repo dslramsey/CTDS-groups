@@ -214,22 +214,13 @@ bin_distances_bw <- function(data, bin_width, truncation) {
 }
 
 #----------------------------------------------
-
 bin_distances_cut <- function(data, cutpoints) {
   truncation <- max(cutpoints)
 
   data |>
-    dplyr::filter(distance <= truncation) |>
-    dplyr::mutate(
-      distbegin = cutpoints[findInterval(distance, cutpoints)],
-      distend   = cutpoints[findInterval(distance, cutpoints) + 1]
+    filter(distance <= truncation) |>
+    mutate(distbegin = cutpoints[findInterval(distance, cutpoints)],
+           distend   = cutpoints[findInterval(distance, cutpoints) + 1]
     )
 }
 
-calc_er<- function(counts) {
-  K<- length(counts)
-  R<- mean(counts)
-  var_er <- sum((counts - R)^2) / (K * (K-1))
-  cv<- sqrt(var_er)/R
-  cv
-}
