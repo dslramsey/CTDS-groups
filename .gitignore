@@ -9,3 +9,6 @@ AGENTS.md
 .posit/assistant
 Data/
 Outputs/
+R/CTDS_groups_sims.R
+R/group_size_funcs.R
+src/generate_detections.cpp
