@@ -8,7 +8,6 @@
 # then place n_cam cameras at random or systematic locations.
 
 library(tidyverse)
-library(patchwork)
 library(Distance)
 
 
@@ -19,20 +18,20 @@ source("R/CTDS_density_functions.R")
 ##---------------------------------------
 ## Uniform density field
 ##---------------------------------------
-n_rep<- 2000   # increase for better inference
-D<- 0.1
-ncams<- 500
-fov<- 40
-w<- 15
-sigma_closest<- 4
-sigma_true<- 12
-MCDS <- FALSE
-perfect_fov<- FALSE
-bearing <- 270
-width<- 500
+n_rep<- 100                 # increase for better inference
+D<- 0.1                     # Density (m2)
+ncams<- 500                 # Camera sectors (and snapshot moments)
+fov<- 40                    # actually camera angle
+w<- 15                      # truncation distance (m)
+sigma_closest<- 4           # True sigma for HN detection of the camera sensor
+sigma_true<- 12             # True sigma for HN detection of animals in camera FOV
+perfect_fov<- FALSE         # Whether FOV detection is turned on (FALSE) or not (TRUE)
+bearing <- 270              # Camera orientation
+width<- 500                 # Sampling frame area width and height (m)
 height<- 500
-clus_rad <- 10
-clus_size<- 60   ## set to 30 for D = 0.005 and 0.01, or 60 for D=0.05 or 0.1
+clus_rad <- 10              # Average radius of clusters (m)
+clus_size<- 60              # average size of clustersd set to 30 for D = 0.005 and 0.01,
+                            # or 60 for D=0.05 or 0.1
 
 delta<- 2.5
 bin_bp <- seq(0, w, by = delta)  # bin breakpoints
@@ -41,7 +40,6 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                               D_true = D,
                               sigma_closest = sigma_closest,
                               sigma_true = sigma_true,
-                              MCDS = MCDS,
                               w = w,
                               fov = fov,
                               perfect_fov = perfect_fov,
@@ -54,7 +52,7 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                               binned = FALSE,
                               breaks = NULL)
 
-  write_rds(res_unif, "outputs/res_unif_ctds_high.rds")
+  #write_rds(res_unif, "outputs/res_unif_ctds_high.rds")
   summarise_density_sim(res_unif)
 
   res_unif_cl <- run_density_closest(n_rep = n_rep,
@@ -73,7 +71,7 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                                   binned = FALSE,
                                   breaks = NULL)
 
-  write_rds(res_unif_cl, "outputs/res_unif_cl_vlow.rds")
+  #write_rds(res_unif_cl, "outputs/res_unif_cl_vlow.rds")
   summarise_density_sim(res_unif_cl)
 
   res_unif_lps <- run_density_lapse(n_rep = n_rep,
@@ -91,7 +89,7 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                                      binned = FALSE,
                                      breaks = NULL)
 
-  write_rds(res_unif_lps, "outputs/res_unif_lps_vlow.rds")
+  #write_rds(res_unif_lps, "outputs/res_unif_lps_vlow.rds")
 
   print(bind_rows(
     summarise_density_sim(res_unif),
@@ -112,7 +110,6 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                               D_true = D,
                               sigma_closest = sigma_closest,
                               sigma_true = sigma_true,
-                              MCDS = MCDS,
                               w = w,
                               fov = fov,
                               perfect_fov = perfect_fov,
@@ -127,7 +124,7 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 
   summarise_density_sim(res_clus)
 
-  write_rds(res_clus, "outputs/res_clus_ctds_vlow.rds")
+  #write_rds(res_clus, "outputs/res_clus_ctds_vlow.rds")
 
   res_clus_cl <- run_density_closest(n_rep = n_rep,
                                      D_true = D,
@@ -145,7 +142,7 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                                      binned = FALSE,
                                      breaks = NULL)
 
-  write_rds(res_clus_cl, "outputs/res_clus_cl_vlow.rds")
+  #write_rds(res_clus_cl, "outputs/res_clus_cl_vlow.rds")
 
   res_clus_lps <- run_density_lapse(n_rep = n_rep,
                                      D_true = D,
@@ -162,7 +159,7 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                                      binned = FALSE,
                                      breaks = NULL)
 
-  write_rds(res_clus_lps, "outputs/res_clus_lps_vlow.rds")
+  #write_rds(res_clus_lps, "outputs/res_clus_lps_vlow.rds")
 
   print(bind_rows(
     summarise_density_sim(res_clus),

@@ -25,7 +25,7 @@ generate_animals <- function(
       cluster_id = 1
     )
   } else {
-    # Number of cluster centres needed
+    # Number of cluster centres
     n_clusters <- max(1, ceiling(N / mean_cluster_size))
 
     centres <- data.frame(
@@ -55,22 +55,15 @@ generate_animals <- function(
 
 
 ## ----- Model selection by AIC ----------------------------
-select_best_ds <- function(dist_ds, w, MCDS = FALSE, binned = FALSE, breaks = NULL) {
+select_best_ds <- function(dist_ds, w, binned = FALSE, breaks = NULL) {
   # Fit detection functions to distance data using ds() in the Distance package
   # cycle through candidate models and select best using AIC
   # Candidate models: key + adjustment + formula combinations
-  if(MCDS) {
   candidates <- list(
-    list(key = "hn",   adjustment = NULL, formula = ~gs),
-    list(key = "hr",   adjustment = NULL, formula = ~gs),
-    list(key = "unif", adjustment = NULL, formula = ~gs)
-  ) } else {
-  candidates <- list(
-      list(key = "hn",   adjustment = "cos", formula = ~1),
-      list(key = "hr",   adjustment = "cos", formula = ~1),
-      list(key = "unif", adjustment = "cos", formula = ~1)
+      list(key = "hn",   adjustment = "cos"),
+      list(key = "hr",   adjustment = "cos"),
+      list(key = "unif", adjustment = "cos")
     )
-  }
 
   fits <- list()
   aics <- c()
@@ -80,13 +73,18 @@ select_best_ds <- function(dist_ds, w, MCDS = FALSE, binned = FALSE, breaks = NU
     fit_i <- tryCatch({
       if (binned && !is.null(breaks)) {
         dist_ds<- bin_distances_cut(dist_ds, cutpoints = breaks)
-        suppressWarnings(suppressMessages(ds(dist_ds, key = cand$key,
-                                             adjustment = cand$adjustment,
-           transect = "point", formula = cand$formula)))
+        suppressWarnings(
+          suppressMessages(
+            ds(dist_ds, key = cand$key, adjustment = cand$adjustment, transect = "point")
+            )
+          )
       } else {
-        suppressWarnings(suppressMessages(ds(dist_ds, key = cand$key,
-                                             adjustment = cand$adjustment,
-           transect = "point", truncation = w, formula = cand$formula)))
+        suppressWarnings(
+          suppressMessages(
+            ds(dist_ds, key = cand$key, adjustment = cand$adjustment,
+               transect = "point", truncation = w)
+            )
+          )
       }
     }, error = function(e) NULL)
 
@@ -103,7 +101,7 @@ select_best_ds <- function(dist_ds, w, MCDS = FALSE, binned = FALSE, breaks = NU
 
 ##---- Simulation functions -----------------------
 
-sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, MCDS=FALSE,
+sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
                      w, fov, n_cam, width, height,
                      distribution = "uniform", perfect_fov = TRUE,
                      cluster_radius = 30, mean_cluster_size = 5,
@@ -182,7 +180,7 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL, MCDS=FALSE,
   if (nrow(dist_ds) < min_total) return(NULL)
 
   tryCatch({
-    fit <- select_best_ds(dist_ds, w = w, MCD = MCDS, binned = binned, breaks = breaks)
+    fit <- select_best_ds(dist_ds, w = w, binned = binned, breaks = breaks)
 
     est <- dht2(fit, flatfile = dist, strat_formula = ~1, er_est="P2",
                 sample_fraction = fov/360)
@@ -501,6 +499,7 @@ bin_probs_hn <- function(breaks, sigma, gs) {
 }
 
 ##---- conditional likelihood for continuous data ----
+
 nll.cond.point.hn <- function(parm, x, w, gs){
   # HN detection function
   sigma <- exp(parm)
@@ -646,7 +645,7 @@ estimate_density_closest <- function(counts, w, angle, fit, level = 0.95) {
   nk<- rep(NA_real_, K)
   c_nonzero<- counts
   c_nonzero[c_nonzero < 1]<- 1 # Zero counts get group size 1 for areas
-  med_gs<- median(counts[counts > 0])  # median group size
+  med_gs<- median(counts[counts > 0])  # median group size (for variance calcs)
 
     # effective detection probability now depends on group size
   for(k in seq_len(K)) {
@@ -694,7 +693,6 @@ run_density_ctds<- function(n_rep = 5,
                             D_true = 0.01,
                             sigma_closest = 4,
                             sigma_true= 12,
-                            MCDS = FALSE,
                             w = 12,
                             fov = 40,
                             perfect_fov = FALSE,
@@ -714,7 +712,7 @@ run_density_ctds<- function(n_rep = 5,
   res <- vector("list", n_rep)
   pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
   for (i in seq_len(n_rep)) {
-    res[[i]] <- sim_ctds(D_true, sigma_closest, sigma_true, MCDS,
+    res[[i]] <- sim_ctds(D_true, sigma_closest, sigma_true,
                          w, fov, n_cam, width, height,
                          distribution = distribution,
                          perfect_fov = perfect_fov,
