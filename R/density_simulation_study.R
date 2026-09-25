@@ -176,7 +176,7 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
   plot_density_sim(res_clus)
 
 
-## Sumarise results--------------------------------------------
+## Summarise results--------------------------------------------
 
 models<- c("res_unif_ctds","res_unif_cl","res_unif_lps",
            "res_clus_ctds","res_clus_cl","res_clus_lps")
@@ -198,7 +198,6 @@ res_all <- fnames |>
   filter(file.exists(fname)) |>
   mutate(data = purrr::map(fname, function(f) {
     d <- readRDS(f)
-    # promote the "truth" attribute to columns before row-binding drops it
     tr <- attr(d, "truth")
     d <- tibble::as_tibble(d)
     for (nm in names(tr)) d[[nm]] <- tr[[nm]]
