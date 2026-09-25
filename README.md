@@ -7,45 +7,56 @@ applications
 
 This repository contains code for peer review only:
 
-- Camera trap distance sampling (CTDS) is popular recent method used to
-  estimate wildlife abundance from camera trap images that uses the
+- Camera trap distance sampling (CTDS) is a popular recent method used
+  to estimate wildlife abundance from camera trap images that uses the
   distances of detected individuals from the camera and point distance
   sampling methods to estimate animal density. When multiple individuals
   are detected in the camera field of view at the same time, standard
-  practice suggests that distances to all individuals in the group be
-  used when estimating a distance sampling detection function. However,
-  this may be problematic in CTDS studies as individuals in a group are
-  likely to occur at a range of distances from the camera.
+  practice involves recording the distance to all observed individuals
+  when estimating a distance sampling detection function.\
 - For camera traps that rely on heat-in-motion sensors to trigger the
   camera, the closest individual is most likely to trigger the camera
-  sensor. This means that other group members in the image may not
-  represent independent detections, causing bias in the estimated
-  detection function.
-- To address this, we developed a new availability model based on the
-  distance distribution of the nearest individual in a group using order
-  statistics; to better reflect how grouped animals are detected by
-  camera traps.
-- Simulation results show that the standard CTDS approach can produce
-  substantial positive bias, especially as group size increases, whereas
-  the adjusted availability gives approximately unbiased estimates when
-  only the closest detection in a group is recorded.
-- Our study demonstrates that the proposed method improves CTDS analyses
-  for social or group-living species, while noting that its validity
-  depends on assumptions about which animal triggers the sensor and how
-  individuals are distributed within the camera field of view
+  sensor. This means that other individuals in the field of view could
+  contribute observations that do not depend on the sensitivity of the
+  camera sensor. This likely represents a source of detection
+  heterogeneity.
+- Theory suggests that this heterogeneity can be accounted for by
+  fitting a single detection function to the distances of all observable
+  individuals, and unbiased estimates of density should then be obtained
+  based on the property of pooling robustness.
+- An alternative approach in this situation is to explicitly model the
+  detection of the closest individual, which should directly represent
+  the detection probability of the camera sensor. To address this, we
+  developed a new availability model based on the distance distribution
+  of the nearest individual using order statistics; to better reflect
+  how multiple individuals are detected by camera traps.
+- Simulation results show that the standard CTDS approach has a small
+  negative bias under this source of detection heterogeneity, whereas
+  the adjusted availability gives approximately unbiased estimates with
+  near optimal confidence interval coverage when only the closest
+  detection in a group is recorded. Simulation of standard CTDS when
+  cameras are not triggered by a sensor (i.e. time-lapse mode) were
+  unbiased under all scenarios we considered.
+- Our study demonstrates that the proposed method has some advantages
+  over the standard CTDS analyses for camera traps triggered by a
+  heat-in-motion sensor as only a single distance need be recorded in
+  images containing multiple individuals.
 
 ### File descriptions:
 
-- `r/CTDS_groups_sims.r` simulation code to generate random distances of
-  individuals from camera traps and fit distance sampling detection
-  functions using a new availability model for the closest individual in
-  a detected group in CTDS snapshot moments.
-- `r/group_size_functions.r` contains various functions required by the
-  main script.
-- `src/generate_detection.cpp` Rcpp source code used for generating
-  grouped distances and detections. Called by `generate_detections` R
-  function.
+- `r/density_simulation_stydy.r` simulation code to generate random
+  animal locations within a rectangular area that are then sampled with
+  random camera locations (circle sector with given angular field of
+  view). Includes options for both random uniform and clustered
+  distributions of animals. Camera snapshot moments are generated
+  assuming the closest individual triggers the camera. Density
+  estimation compares the standard CTDS approach with our method based
+  on recording only the distance to the closest individual in the group.
+  We also compare results with an alternative CTDS method where cameras
+  are not triggered by a sensor.
+- `r/CTDS_density_functions.r` contains various functions required by
+  the main script.
 
 ## Prerequisites
 
-The script require packages `tidyverse`, `tidyr`.
+The script require packages `tidyverse`, `Distance`, `numDeriv`.
