@@ -11,7 +11,6 @@ library(tidyverse)
 library(Distance)
 library(docstring)
 
-source("R/group_size_funcs.R")
 source("R/CTDS_density_functions.R")
 
 # For function help use docstring e.g.
@@ -26,7 +25,7 @@ fov<- 40                    # actually camera angle
 w<- 15                      # truncation distance (m)
 sigma_closest<- 4           # True sigma for HN detection of the camera sensor
 sigma_true<- 8              # True sigma for HN detection of animals in camera FOV
-perfect_fov<- FALSE         # Whether FOV detection is turned on (FALSE) or not (TRUE)
+perfect_fov<- TRUE          # Whether FOV detection is turned on (FALSE) or not (TRUE)
 bearing <- 270              # Camera orientation
 width<- 500                 # Sampling frame area width and height (m)
 height<- 500
@@ -53,8 +52,9 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
                               binned = FALSE,
                               breaks = NULL)
 
-  write_rds(res_unif, "outputs/8M/res_unif_ctds_low.rds")
   summarise_density_sim(res_unif)
+
+  write_rds(res_unif, "outputs/pfov/res_unif_ctds_low.rds")
 
   res_unif_cl <- run_density_closest(n_rep = n_rep,
                                   D_true = D,
@@ -179,22 +179,21 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints
 
 ## Summarise results--------------------------------------------
 
+sigma_fov<- c("12m","8m","pfov")
 models<- c("res_unif_ctds","res_unif_cl","res_unif_lps",
            "res_clus_ctds","res_clus_cl","res_clus_lps")
 rdens<- c("vlow","low","med","high")
-stub4<- ".rds"
 
-fnames<- crossing(models, rdens, stub4)
+fnames<- crossing(models, rdens, sigma_fov)
 
 fnames_list <- fnames |>
-  select(-stub4) |>
-  tidyr::unite(fname, everything(), sep = "_") |>
+  tidyr::unite(fname, c("models","rdens"), sep = "_") |>
+  tidyr::unite(fname, c("sigma_fov","fname"), sep = "/") |>
   mutate(fname = file.path("Outputs", paste0(fname, ".rds"))) |>
   pull(fname)
 
 ## read all result files and row-bind, keeping parameter columns from fnames
 res_all <- fnames |>
-  select(-stub4) |>
   mutate(fname = fnames_list) |>
   filter(file.exists(fname)) |>
   mutate(data = purrr::map(fname, function(f) {
@@ -205,7 +204,7 @@ res_all <- fnames |>
     d
   })) |>
   tidyr::unnest(data) |>
-    select(-fname, -rdens, -w, -fov, -sigma_true, -n_cam)
+    select(-fname, -rdens, -w, -fov, -n_cam)
 
 ##---- Identify outliers-----
 
@@ -219,20 +218,22 @@ res_summ<- res_all |>
       summarise(
         n        = n(),
         mean_n   = mean(mean_n),
-        median_D   = median(D),
-        rel_bias = median((D - first(D_true)) / first(D_true)),
-        cv_enc   = median(cv_encounter),
-        cv_det   = median(cv_detection),
-        cv       = median(cv),
-        coverage = mean(cover),
-        .by = c(model, distribution, D_true)
+        median_D   = median(D, na.rm=TRUE),
+        rel_bias = median((D - first(D_true)) / first(D_true),na.rm=TRUE),
+        cv_enc   = median(cv_encounter,na.rm=TRUE),
+        cv_det   = median(cv_detection,na.rm=TRUE),
+        cv       = median(cv,na.rm=TRUE),
+        coverage = mean(cover,na.rm=TRUE),
+        .by = c(model, distribution, sigma_fov, D_true)
       ) |>
       mutate(across(c(median_D, rel_bias, cv_det, cv_enc, cv, coverage), ~round(.x, 3))) |>
       mutate(mean_n = round(mean_n, 1)) |>
-      arrange(model, distribution, D_true)
+      arrange(model, distribution, sigma_fov, D_true)
 
-write_csv(filter(res_summ, distribution=="uniform"), "outputs/sim_summary_unif.csv")
-write_csv(filter(res_summ, distribution=="clustered"), "outputs/sim_summary_clus.csv")
+write_csv(filter(res_summ, sigma_fov=="pfov"), "outputs/sim_summary_pfov.csv")
+write_csv(filter(res_summ, sigma_fov=="8m"), "outputs/sim_summary_8m.csv")
+
+write_csv(filter(res_summ, sigma_fov=="12m"), "outputs/sim_summary_12m.csv")
 
 res_summ |> group_by(model) |> summarise(cv = mean(cv), cover = mean(coverage))
 
@@ -241,18 +242,24 @@ win.graph(10,8)
 res_all |> mutate(model = factor(model,
                         levels = c("CTDS", "Closest", "lapse"),
                         labels = c("CTDS", "Closest", "Time lapse")),
+                  sigma_fov = factor(sigma_fov,
+                                     levels = c("pfov","12m","8m"),
+                                     labels = c("Perfect","Imperfect","8m")),
          distribution = factor(distribution,
                                levels = c("uniform", "clustered"),
                                labels = c("Uniform", "Clustered"))) |>
-ggplot(aes(x = factor(D_true), y = (D - D_true) / D_true, fill = model)) +
-  geom_boxplot(outlier.size = 0.5, outliers = FALSE) +
+  filter(sigma_fov %in% c("Perfect","Imperfect")) |>
+ggplot(aes(x = factor(D_true), y = (D - D_true) / D_true, fill = sigma_fov)) +
+  geom_boxplot(outlier.size = 0.5, outliers = FALSE,
+               position = position_dodge(width = 0.8)) +
   geom_hline(yintercept = 0, linetype = "dashed") +
   geom_hline(yintercept = c(-0.1,0.1), linetype = "dotted") +
   facet_grid(distribution ~ model) +
   coord_cartesian(ylim = c(-1, 1)) +
-  labs(x = "True density (D)", y = expression(bold("Relative bias of " * hat(D)))) +
+  labs(x = "True density (D)", y = expression(bold("Relative bias of " * hat(D))),
+       fill = "Detection") +
   theme_bw() +
-  theme(legend.position = "none",
+  theme(legend.position = "bottom",
         axis.title = element_text(face = "bold", size=14),
         axis.text = element_text(size=11),
         strip.text = element_text(face = "bold", size =12))
