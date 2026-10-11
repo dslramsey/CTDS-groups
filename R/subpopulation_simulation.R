@@ -280,7 +280,7 @@ dir.create("outputs", showWarnings = FALSE)
 write_rds(res, "outputs/res_subpopulation.rds")
 
 # you can write in res here and investigate with summaries and plots below
-# res <- readRDS("outputs/res_subpopulation.rds")
+res <- readRDS("outputs/res_subpopulation.rds")
 
 ##---------------------------------------
 ## Summaries
@@ -360,7 +360,11 @@ bias_dat <- bind_rows(
     mutate(subpop = "Total (pooled)",
            rel_bias = (N - 2 * N_true) / (2 * N_true)) |>
     select(model, rep, subpop, rel_bias)) |>
-  mutate(subpop = factor(subpop, levels = c(subpops, "Total (pooled)")))
+  mutate(subpop = factor(subpop, levels = c(subpops, "Total (pooled)"),
+                         labels = c("A (uniform)","B (clustered)","Total (pooled)")))
+
+bias_dat |> summarise(bias = median(rel_bias), .by = c(model,subpop))
+
 
 p_bias <- ggplot(bias_dat, aes(subpop, rel_bias, fill = subpop)) +
   geom_boxplot(outlier.size = 0.5, outliers = FALSE) +
@@ -371,7 +375,7 @@ p_bias <- ggplot(bias_dat, aes(subpop, rel_bias, fill = subpop)) +
   scale_fill_manual(values = c("grey75", "grey45", "steelblue")) +
   labs(x = NULL, y = expression(bold("Relative bias of " * hat(N)))) +
   theme_ms + theme(axis.text.x = element_text(angle = 25, hjust = 1))
-ggsave("outputs/subpop_rel_bias.png", p_bias, width = 10, height = 5.2, dpi = 300)
+ggsave("outputs/subpop_rel_bias.png", p_bias, width = 12, height = 5.2, dpi = 300)
 
 cat("\n===== relative bias: subpopulations and the pooled total =====\n")
 print(as.data.frame(bias_dat |>
@@ -380,41 +384,5 @@ print(as.data.frame(bias_dat |>
   pivot_wider(names_from = subpop, values_from = c(mean_bias, median_bias)) |>
   arrange(model)))
 
-#### OPTIONAL Plot for supp material, example populations ####
-## example realisations of the two subpopulations, with camera sectors
-set.seed(7)
-sector_poly <- function(id, ox, oy, bearing, radius, angle, n = 40) {
-  half <- (angle * pi / 180) / 2
-  b    <- bearing * pi / 180
-  a    <- seq(b - half, b + half, length.out = n)
-  data.frame(id = id, x = c(ox, ox + radius * cos(a)),
-             y = c(oy, oy + radius * sin(a)))
-}
-cam_demo <- data.frame(id = 1:25,
-                       x = runif(25, w, width - w), y = runif(25, w, height - w))
-sectors  <- pmap(cam_demo, function(id, x, y)
-  sector_poly(id, x, y, 270, w, fov)) |> list_rbind()
 
-mgs   <- res |> summarise(m = mean(mean_gs), .by = subpop) |> deframe()
-field <- bind_rows(
-  generate_animals(width, height, D_true, "uniform") |> select(x, y) |>
-    mutate(panel = sprintf("(A) Uniform\nmean group size in view = %.1f", mgs["Uniform"])),
-  generate_animals(width, height, D_true, "clustered",
-                   cluster_radius = clus_radius, mean_cluster_size = clus_size) |>
-    select(x, y) |>
-    mutate(panel = sprintf("(B) Clustered\nmean group size in view = %.1f", mgs["Clustered"])))
-
-p_field <- ggplot(field, aes(x, y)) +
-  geom_point(alpha = 0.25, size = 0.3) +
-  geom_polygon(data = expand_grid(panel = unique(field$panel), sectors),
-               aes(group = id), fill = "firebrick", alpha = 0.35,
-               colour = "firebrick", linewidth = 0.25) +
-  facet_wrap(~panel) +
-  coord_equal(xlim = c(0, width), ylim = c(0, height)) +
-  labs(x = "x (m)", y = "y (m)") +
-  theme_bw() +
-  theme(axis.title = element_text(face = "bold", size = 12),
-        strip.text = element_text(face = "bold", size = 11))
-ggsave("outputs/subpop_field.png", p_field, width = 9, height = 5, dpi = 300)
-
-print(p_field); print(p_abund); print(p_bias)
+print(p_abund); print(p_bias)

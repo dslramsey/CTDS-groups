@@ -52,16 +52,15 @@ This repository contains code for peer review only:
   on recording only the distance to the closest individual in the group.
   We also compare results with an alternative CTDS method where cameras
   are not triggered by a sensor.
-- `r/subpopulation_simulation.r` simulation code (largely contained in `sim_once()`) 
-  to generate random animal location in two "subpopulations" of the same density (e.g. 0.01) 
-  as per `r/density_simulation_study.r`, but with different levels of clustering, essentially,
-  impacting only the average group size. However, instead of estimating abundance
-  of each subpopulation with the use of a separate detection function, a single
-  detection function is used for the following methods: CTDS, MCDS (subpopulation 
-  covariate), 'closest' and time-lapse. Plots and tables are generated at the end of
-  the script using the output of the replicate `sim_once()` saved as `outputs/res_subpopulation.rds`.
+- `r/subpopulation_simulation.r` simulation code to generate random
+  animal location in two “subpopulations” of the same density but with
+  different levels of clustering, essentially, impacting only the
+  average group size. A single detection function is then fitted to the
+  pooled data using the standard CTDS approach and our closest
+  individual approach. We also include a model that fits a covariate for
+  the subpopulation identity using MCDS.
 - `r/CTDS_density_functions.r` contains various functions required by
-  the main script. Help for each function can viewed using the
+  the main scripts. Help for each function can viewed using the
   `docstring` package.
 
 ## Prerequisites

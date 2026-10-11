@@ -266,6 +266,7 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
     data.frame(
       n_total      = est$n,
       mean_n       = mean(counts[counts > 0]),
+      sigma        = NA_real_,
       D            = est$Abundance,
       se           = est$Abundance_se,
       cv_encounter = est$ER_CV,
@@ -279,6 +280,7 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
     data.frame(
       n_total      = sum(counts),
       mean_n       = mean(counts),
+      sigma        = NA_real_,
       D            = NA_real_,
       se           = NA_real_,
       cv_encounter = NA_real_,
@@ -309,8 +311,9 @@ sim_closest <- function(D_true, sigma_closest, sigma_true,
   #' see \code{\link{sim_ctds}} for a description of function arguments
   #'
   #' @return A one-row \code{data.frame} with the same columns as
-  #'   \code{\link{sim_ctds}}; returns \code{NULL} if fewer than
-  #'   \code{min_total} cameras record a triggering individual.
+  #'   \code{\link{sim_ctds}} plus \code{sigma} (the estimated half-normal
+  #'   scale); returns \code{NULL} if fewer than \code{min_total} cameras
+  #'   record a triggering individual.
   #'
   animals<- generate_animals(width = width,
                              height = height,
@@ -368,6 +371,7 @@ sim_closest <- function(D_true, sigma_closest, sigma_true,
   data.frame(
     n_total      = est$n,
     mean_n       = mean(counts[counts>0]),
+    sigma        = fit$sigma,
     D            = est$D,
     se           = est$se,
     cv_encounter = est$cv_encounter,
@@ -452,6 +456,7 @@ sim_lapse <- function(D_true, sigma_true, w, fov, n_cam, width, height,
   data.frame(
     n_total      = est$n,
     mean_n       = mean(counts[counts>0]),
+    sigma        = fit$sigma,
     D            = est$D,
     se           = est$se,
     cv_encounter = est$cv_encounter,
