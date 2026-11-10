@@ -5,32 +5,13 @@ applications
 
 ## Overview
 
-This repository contains code for peer review only:
+This repository contains data and code from:
 
-- Camera trap distance sampling (CTDS) is a popular recent method used
-  to estimate wildlife abundance from camera trap images that uses the
-  distances of detected individuals from the camera and point distance
-  sampling methods to estimate animal density. When multiple individuals
-  are detected in the camera field of view at the same time, standard
-  practice involves recording the distance to all observed individuals
-  when estimating a distance sampling detection function.
-- For camera traps that rely on heat-in-motion sensors to trigger the
-  camera, the closest individual is most likely to trigger the camera
-  sensor. This means that other individuals in the field of view could
-  contribute observations that do not depend on the sensitivity of the
-  camera sensor. This likely represents a source of detection
-  heterogeneity.
-- Theory suggests that this heterogeneity can be accounted for by
-  fitting a single detection function to the distances of all observable
-  individuals, and unbiased estimates of density should then be obtained
-  based on the property of pooling robustness. This is the approach
-  currently advocated for analysing CTDS data.
-- An alternative approach in this situation is to explicitly model the
-  detection of the closest individual, which should directly represent
-  the detection probability of the camera sensor. To address this, we
-  developed a new availability model based on the distance distribution
-  of the nearest individual using order statistics; to better reflect
-  how multiple individuals are detected by camera traps.
+Ramsey, D.S.L., and Cally, J.G. (2027). A new method to account for the
+detection of multiple individuals in camera traps for use in camera trap
+distance sampling (CTDS) applications. *Methods in Ecology and
+Evolution* (in press).
+
 - This repository contains `R` code and functions to conduct the
   simulations documented in the manuscript comparing the performance of
   the standard CTDS approach with the new method based on recording only

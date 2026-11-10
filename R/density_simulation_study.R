@@ -1,5 +1,5 @@
 # Simulation study: bias and coverage of standard CTDS distance-sampling
-# compared with closest individual detetcion, using multiple independent
+# compared with closest individual detection, using multiple independent
 # camera placements per replicate.
 # Density estimated using conditional likelihood and an empirical
 # encounter-rate variance estimator.
@@ -15,16 +15,18 @@ source("R/CTDS_density_functions.R")
 
 # For function help use docstring e.g.
 docstring(run_density_ctds)
+
+set.seed(2026)
 ##---------------------------------------
-## Uniform density field
+## Simulation parameters
 ##---------------------------------------
-n_rep<- 10                  # increase for better inference
+n_rep<- 100                 # increase for better inference
 D<- 0.01                    # Density (m2)
 ncams<- 500                 # Camera sectors (and snapshot moments)
 fov<- 40                    # actually camera angle
 w<- 15                      # truncation distance (m)
 sigma_closest<- 4           # True sigma for HN detection of the camera sensor
-sigma_true<- 12             # True sigma for HN detection of animals in camera FOV
+sigma_fov<- 12              # True sigma for HN detection of animals in camera FOV
 perfect_fov<- FALSE         # Whether FOV detection is turned on (FALSE) or not (TRUE)
 bearing <- 270              # Camera orientation
 width<- 500                 # Sampling frame area width and height (m)
@@ -36,10 +38,15 @@ clus_size<- 30              # average size of cluster sd. set to 30 for D = 0.00
 delta<- 2.5
 bin_bp <- seq(0, w, by = delta)  # bin breakpoints for binned = TRUE
 
+##---------------------------------------
+## Uniform density field
+##---------------------------------------
+
+# Standard CTDS
   res_unif <- run_density_ctds(n_rep = n_rep,
                               D_true = D,
                               sigma_closest = sigma_closest,
-                              sigma_true = sigma_true,
+                              sigma_fov = sigma_fov,
                               w = w,
                               fov = fov,
                               perfect_fov = perfect_fov,
@@ -52,10 +59,11 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints for binned = TRUE
                               binned = FALSE,
                               breaks = NULL)
 
+# Closest distance with adjusted availability
   res_unif_cl <- run_density_closest(n_rep = n_rep,
                                   D_true = D,
                                   sigma_closest = sigma_closest,
-                                  sigma_true = sigma_true,
+                                  sigma_fov = sigma_fov,
                                   w = w,
                                   fov = fov,
                                   perfect_fov = perfect_fov,
@@ -67,10 +75,10 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints for binned = TRUE
                                   mean_cluster_size =  clus_size,
                                   binned = FALSE,
                                   breaks = NULL)
-
+# Time lapse mode
   res_unif_lps <- run_density_lapse(n_rep = n_rep,
                                      D_true = D,
-                                     sigma_true = sigma_true,
+                                     sigma_fov = sigma_fov,
                                      w = w,
                                      fov = fov,
                                      perfect_fov = perfect_fov,
@@ -89,13 +97,15 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints for binned = TRUE
     summarise_density_sim(res_unif_lps)
   ))
 
-  ##---------------------------------------
-  ## Clustered density field
-  ##---------------------------------------
+##---------------------------------------
+## Clustered density field
+##---------------------------------------
+
+# Standard CTDS
   res_clus <- run_density_ctds(n_rep = n_rep,
                               D_true = D,
                               sigma_closest = sigma_closest,
-                              sigma_true = sigma_true,
+                              sigma_fov = sigma_fov,
                               w = w,
                               fov = fov,
                               perfect_fov = perfect_fov,
@@ -108,10 +118,11 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints for binned = TRUE
                               binned = FALSE,
                               breaks = NULL)
 
+# Closest distance with adjusted availability
   res_clus_cl <- run_density_closest(n_rep = n_rep,
                                      D_true = D,
                                      sigma_closest = sigma_closest,
-                                     sigma_true = sigma_true,
+                                     sigma_fov = sigma_fov,
                                      w = w,
                                      fov = fov,
                                      perfect_fov = perfect_fov,
@@ -123,10 +134,10 @@ bin_bp <- seq(0, w, by = delta)  # bin breakpoints for binned = TRUE
                                      mean_cluster_size =  clus_size,
                                      binned = FALSE,
                                      breaks = NULL)
-
+# Time lapse mode
   res_clus_lps <- run_density_lapse(n_rep = n_rep,
                                      D_true = D,
-                                     sigma_true = sigma_true,
+                                     sigma_fov = sigma_fov,
                                      w = w,
                                      fov = fov,
                                      perfect_fov = perfect_fov,
@@ -161,10 +172,10 @@ res_all<- bind_rows(lapply(list(res_unif,res_unif_cl,res_unif_lps,
 
 ##---- Box plot of relative bias (minimum example) ----
 
-win.graph(10,8)
-res_all |> mutate(model = factor(model,
-                        levels = c("CTDS", "Closest", "lapse")),
-         distribution = factor(distribution,
+
+bias_plot<- res_all |>
+            mutate(model = factor(model,levels = c("CTDS", "Closest", "lapse")),
+            distribution = factor(distribution,
                                levels = c("uniform", "clustered"),
                                labels = c("Uniform", "Clustered"))) |>
 ggplot(aes(x = factor(D_true), y = (D - D_true) / D_true, fill = model)) +
@@ -183,3 +194,4 @@ ggplot(aes(x = factor(D_true), y = (D - D_true) / D_true, fill = model)) +
         strip.text = element_text(face = "bold", size =12))
 
 
+bias_plot

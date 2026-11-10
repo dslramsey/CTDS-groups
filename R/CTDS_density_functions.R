@@ -137,7 +137,7 @@ select_best_ds <- function(dist_ds, w, binned = FALSE, breaks = NULL) {
 ##---- Simulation functions -----------------------
 
 
-sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
+sim_ctds <- function(D_true, sigma_closest, sigma_fov=NULL,
                      w, fov, n_cam, width, height,
                      distribution = "uniform", perfect_fov = TRUE,
                      cluster_radius = 30, mean_cluster_size = 5,
@@ -154,7 +154,7 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
   #' @param D_true Numeric. True animal density (animals per unit area).
   #' @param sigma_closest Numeric. Scale of the half-normal function governing
   #'   detection (triggering) of the closest individual.
-  #' @param sigma_true Numeric or \code{NULL}. Scale of the half-normal
+  #' @param sigma_fov Numeric or \code{NULL}. Scale of the half-normal
   #'   detection function for other individuals within the field of view; only
   #'   used when \code{perfect_fov = FALSE}.
   #' @param w Numeric. Truncation distance (sector radius).
@@ -165,7 +165,7 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
   #'   passed to \code{\link{generate_animals}}.
   #' @param perfect_fov Logical. If \code{TRUE}, all animals in the sector are
   #'   recorded once the camera triggers; if \code{FALSE}, further animals are
-  #'   detected with half-normal probability using \code{sigma_true}.
+  #'   detected with half-normal probability using \code{sigma_fov}.
   #' @param cluster_radius,mean_cluster_size Passed to
   #'   \code{\link{generate_animals}} for clustered distributions.
   #' @param min_total Integer. Minimum total detections required; replicates
@@ -192,7 +192,7 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
                              mean_cluster_size = mean_cluster_size)
 
   # Camera locations, kept >= w from every edge so each sector stays
-  # fully inside the region for any bearing (requires region wider than 2w).
+  # fully inside the region for any bearing.
   cx <- runif(n_cam, w, width - w)
   cy <- runif(n_cam, w, height - w)
 
@@ -218,8 +218,8 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
       if (rbinom(1, 1, hn_func(r_closest, sigma_closest)) == 1L) {
         # Camera triggered by closest individual
         if(!perfect_fov){
-          # Further animals may be obscured. detection is sigma_true
-          p <- c(1.0, hn_func(dk$r[2:nk], sigma_true)) # r[1] already detected
+          # Further animals may be obscured. detection is sigma_FOV
+          p <- c(1.0, hn_func(dk$r[2:nk], sigma_fov)) # r[1] already detected
           dk<- dk[rbinom(nk, 1, p) == 1, , drop = FALSE]
           dist_list[[k]]<- data.frame(Sample.Label = paste0("C",k),
                                       distance = dk$r,
@@ -295,7 +295,7 @@ sim_ctds <- function(D_true, sigma_closest, sigma_true=NULL,
 
 ##----- Closest distance -----------------------
 
-sim_closest <- function(D_true, sigma_closest, sigma_true,
+sim_closest <- function(D_true, sigma_closest, sigma_fov,
                         w, fov, n_cam, width, height,
                         distribution = "uniform", perfect_fov = TRUE,
                         cluster_radius = 30, mean_cluster_size = 5,
@@ -342,7 +342,7 @@ sim_closest <- function(D_true, sigma_closest, sigma_true,
       # Camera triggered by closest individual
       if(!perfect_fov){
         # Further animals may be obscured. detection is HN
-        p <- c(1.0, hn_func(dk$r[2:nk], sigma_true)) # r[1] already detected
+        p <- c(1.0, hn_func(dk$r[2:nk], sigma_fov)) # r[1] already detected
         dk<- dk[rbinom(nk, 1, p) == 1, , drop = FALSE]
         counts[k]<- nrow(dk) # retain detected for group size
         dist_vec[k]<- r_closest # for detection function
@@ -386,7 +386,7 @@ sim_closest <- function(D_true, sigma_closest, sigma_true,
 ## ----- Time lapse CTDS -----------------
 
 
-sim_lapse <- function(D_true, sigma_true, w, fov, n_cam, width, height,
+sim_lapse <- function(D_true, sigma_fov, w, fov, n_cam, width, height,
                      distribution = "uniform", perfect_fov = TRUE,
                      cluster_radius = 30, mean_cluster_size = 5, min_total = 10,
                      binned = FALSE, breaks = NULL) {
@@ -428,7 +428,7 @@ sim_lapse <- function(D_true, sigma_true, w, fov, n_cam, width, height,
       else if(!perfect_fov){
       # animals may be obscured. detection is HN
       nk<- nrow(dk)
-      p <- hn_func(dk$r, sigma_true)
+      p <- hn_func(dk$r, sigma_fov)
       dk<- dk[rbinom(nk, 1, p) == 1, , drop = FALSE]
       if(nrow(dk) >= 1) {
         dist_list[[k]]<- dk$r
@@ -820,7 +820,7 @@ estimate_density_ctds <- function(counts, w, angle, fit, level = 0.95) {
   #'
   #' Design-based density estimate from independent camera sectors of equal
   #' area. Encounter-rate variance is estimated empirically across cameras
-  #' following Fewster et al. (2009, Biometrics, estimator P2); detection-
+  #' following Fewster et al. (2009, Biometrics, estimator P1); detection-
   #' function variance is added via the delta method, and log-normal confidence
   #' intervals are constructed.
   #'
@@ -848,10 +848,11 @@ estimate_density_ctds <- function(counts, w, angle, fit, level = 0.95) {
     integrate(function(r) availability_cont(r, w, gs) * hn_func(r, sigma), 0 , w)$value
   }
 
+  # Standard availability calculated here (i.e. gs=1)
   a <- theta * pbar(fit$sigma, w = w, gs = 1) # per-camera effective area
   D <- n_total / (K * a)
 
-  # Encounter-rate variance (P2)
+  # Encounter-rate variance (P1)
   R <- mean(counts)
   var_er <- sum((counts - R)^2) / (K * (K-1))
   cv2_er<- var_er/R^2
@@ -932,7 +933,7 @@ estimate_density_closest <- function(counts, w, angle, fit, level = 0.95) {
 
   D<- sum(nk)/(K * theta)
 
-  # Encounter-rate variance (R2)
+  # Encounter-rate variance (P1)
   R <- mean(counts)
   var_er <- sum((counts - R)^2) / (K * (K-1))
   cv2_er<- var_er/R^2
@@ -970,7 +971,7 @@ estimate_density_closest <- function(counts, w, angle, fit, level = 0.95) {
 run_density_ctds<- function(n_rep = 5,
                             D_true = 0.01,
                             sigma_closest = 4,
-                            sigma_true= 12,
+                            sigma_fov= 12,
                             w = 12,
                             fov = 40,
                             perfect_fov = FALSE,
@@ -989,7 +990,7 @@ run_density_ctds<- function(n_rep = 5,
   #' \code{n_cam} random camera sectors within the area defined by \code{width, height};
   #' Cameras are triggered by the closest individual conditional on
   #' \code{sigma_closest} with further individuals subject to detection error
-  #' conditional on \code{sigma_true}.  Distance data is analysed using the
+  #' conditional on \code{sigma_fov}.  Distance data is analysed using the
   #' \code{ds} function in the \code{Distance} package with model selection used
   #' to select the best-fit detection function from a list of candidates.
   #'
@@ -997,7 +998,7 @@ run_density_ctds<- function(n_rep = 5,
   #' @param D_true Numeric. True animal density (animals per unit area).
   #' @param sigma_closest Numeric. Scale of the half-normal function governing
   #'   detection (triggering) of the closest individual.
-  #' @param sigma_true Numeric or \code{NULL}. Scale of the half-normal
+  #' @param sigma_fov Numeric or \code{NULL}. Scale of the half-normal
   #'   detection function for other individuals within the field of view; only
   #'   used when \code{perfect_fov = FALSE}.
   #' @param w Numeric. Truncation distance (sector radius).
@@ -1008,7 +1009,7 @@ run_density_ctds<- function(n_rep = 5,
   #'   passed to \code{\link{generate_animals}}.
   #' @param perfect_fov Logical. If \code{TRUE}, all animals in the sector are
   #'   recorded once the camera triggers; if \code{FALSE}, further animals are
-  #'   detected with half-normal probability using \code{sigma_true}.
+  #'   detected with half-normal probability using \code{sigma_fov}.
   #' @param cluster_radius,mean_cluster_size Passed to
   #'   \code{\link{generate_animals}} for clustered distributions.
   #' @param binned Logical. If \code{TRUE}, distances are binned before fitting.
@@ -1024,7 +1025,7 @@ run_density_ctds<- function(n_rep = 5,
   res <- vector("list", n_rep)
   pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
   for (i in seq_len(n_rep)) {
-    res[[i]] <- sim_ctds(D_true, sigma_closest, sigma_true,
+    res[[i]] <- sim_ctds(D_true, sigma_closest, sigma_fov,
                          w, fov, n_cam, width, height,
                          distribution = distribution,
                          perfect_fov = perfect_fov,
@@ -1036,7 +1037,7 @@ run_density_ctds<- function(n_rep = 5,
   }
   if (progress) close(pb)
   out <- bind_rows(res)
-  attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
+  attr(out, "truth") <- list(D_true = D_true, sigma_fov = sigma_fov,
                              w = w, fov = fov, n_cam = n_cam,
                              distribution = distribution,
                              model = "CTDS")
@@ -1050,7 +1051,7 @@ run_density_ctds<- function(n_rep = 5,
 run_density_closest <- function(n_rep = 5,
                             D_true = 0.01,
                             sigma_closest = 4,
-                            sigma_true = 12,
+                            sigma_fov = 12,
                             w = 15,
                             fov = 40,
                             perfect_fov = FALSE,
@@ -1069,7 +1070,7 @@ run_density_closest <- function(n_rep = 5,
   #' places \code{n_cam} random camera sectors within the area defined
   #' by \code{width, height}; Cameras are triggered by the closest individual
   #' conditional on \code{sigma_closest} with further individuals subject to
-  #' detection error conditional on \code{sigma_true}. Only the closest detected
+  #' detection error conditional on \code{sigma_fov}. Only the closest detected
   #' distance is used to estimate the detection function with the total number
   #' of detected individuals used to estimate the group size parameter \code{n},
   #' (equation 5 of the accompanying manuscript). Variance is estimated
@@ -1085,7 +1086,7 @@ run_density_closest <- function(n_rep = 5,
   res <- vector("list", n_rep)
   pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
   for (i in seq_len(n_rep)) {
-    res[[i]] <- sim_closest(D_true, sigma_closest, sigma_true, w, fov,
+    res[[i]] <- sim_closest(D_true, sigma_closest, sigma_fov, w, fov,
                             n_cam, width, height,
                             distribution = distribution,
                             perfect_fov = perfect_fov,
@@ -1097,7 +1098,7 @@ run_density_closest <- function(n_rep = 5,
   }
   if (progress) close(pb)
   out <- bind_rows(res)
-  attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
+  attr(out, "truth") <- list(D_true = D_true, sigma_fov = sigma_fov,
                              w = w, fov = fov, n_cam = n_cam,
                              distribution = distribution,
                              model = "Closest")
@@ -1109,7 +1110,7 @@ run_density_closest <- function(n_rep = 5,
 
 run_density_lapse <- function(n_rep = 5,
                                 D_true = 0.01,
-                                sigma_true = 12,
+                                sigma_fov = 12,
                                 w = 15,
                                 fov = 40,
                                 perfect_fov = FALSE,
@@ -1128,7 +1129,7 @@ run_density_lapse <- function(n_rep = 5,
   #' places \code{n_cam} random camera sectors within the area defined
   #' by \code{width, height}; Cameras are not triggered by a motion sensor but
   #' are programmed to record snapshot moments at set intervals (time lapse mode).
-  #' individuals are subject to detection error conditional on \code{sigma_true}.
+  #' individuals are subject to detection error conditional on \code{sigma_fov}.
   #' Variance is estimated using a design-based approach as in
   #' \code{\link{run_density_ctds}}.
   #'
@@ -1142,7 +1143,7 @@ run_density_lapse <- function(n_rep = 5,
   res <- vector("list", n_rep)
   pb <- if (progress) utils::txtProgressBar(max = n_rep, style = 3) else NULL
   for (i in seq_len(n_rep)) {
-    res[[i]] <- sim_lapse(D_true, sigma_true, w, fov,
+    res[[i]] <- sim_lapse(D_true, sigma_fov, w, fov,
                             n_cam, width, height,
                             distribution = distribution,
                             perfect_fov = perfect_fov,
@@ -1154,7 +1155,7 @@ run_density_lapse <- function(n_rep = 5,
   }
   if (progress) close(pb)
   out <- bind_rows(res)
-  attr(out, "truth") <- list(D_true = D_true, sigma_true = sigma_true,
+  attr(out, "truth") <- list(D_true = D_true, sigma_fov = sigma_fov,
                              w = w, fov = fov, n_cam = n_cam,
                              distribution = distribution,
                              model = "lapse")

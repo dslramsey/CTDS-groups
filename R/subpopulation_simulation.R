@@ -1,32 +1,28 @@
 # ---------------------------------------------------------------------------
-# Subpopulation bias under a pooled detection function
+# Sub-population bias under a pooled detection function
 # ---------------------------------------------------------------------------
-# Two subpopulations with identical true density that differ only in how animals
+# Two sub-populations with identical true density that differ only in how animals
 # are distributed in space: one uniform (homogeneous Poisson), one clustered.
 # Clustering raises the number of individuals recorded per detected snapshot moment
-# without changing abundance, so the two subpopulations differ in group-size
+# without changing abundance, so the two sub-populations differ in group-size
 # composition while being identical in the quantity being estimated.
 #
-# Both subpopulations are surveyed together and analysed with a single pooled
-# detection function, as would be common in real-world studies,
-# as small per-subpopulation sample sizes usually require.
-# Any difference between the two estimates is therefore bias: the truth is the
-# same abundance in both.
+# Both su-bpopulations are surveyed together and analysed with a single pooled
+# detection function, as would be common in real-world studies.
 #
 # Observation process is as in the main simulations (see results 3.1): the closest individual
 # triggers the camera following a half-normal with scale sigma_closest (here set to 4m); any
 # further individuals in the FOV are then detected following a half-normal with
 # scale sigma_fov (here set to 12m), so group size is subject to detection error.
 #
-# Models (all share one pooled detection function, subpopulation = stratum):
+# Models (all share one pooled detection function, sub-population = stratum):
 #   CTDS         distances to all detected individuals; key selected by AIC
 #                from half-normal, hazard-rate and uniform keys with cosine
 #                adjustments (select_best_ds)
-#   MCDS         as CTDS but with subpopulation as a covariate on the scale
+#   MCDS         as CTDS but with sub-population ID as a covariate on the scale
 #                parameter; key selected by AIC from half-normal and
 #                hazard-rate. No adjustment terms: ds() cannot enforce
-#                monotonicity alongside covariates ("Monotonicity cannot be
-#                enforced with covariates"), so adjusted covariate models are
+#                monotonicity alongside covariates so adjusted covariate models are
 #                not guaranteed to be valid detection functions. A uniform key
 #                has no scale parameter for a covariate to act on and is
 #                likewise excluded.
@@ -48,7 +44,7 @@ source("R/CTDS_density_functions.R")
 ##---------------------------------------
 ## Settings
 ##---------------------------------------
-n_rep         <- 2000          # replicates; ~2 h at these settings, reduce to test
+n_rep         <- 100          # replicates; ~2 h at these settings, reduce to test
 D_true        <- 0.01         # true density of BOTH subpopulations (m^-2)
 n_cam         <- 1000         # cameras (= snapshot moments) per subpopulation
 w             <- 15           # truncation distance (m)
@@ -75,7 +71,7 @@ quiet_ds <- function(expr) {
   })), error = function(e) NULL)
 }
 
-# abundance by subpopulation from a fitted ds model
+# abundance by sub-population from a fitted ds model
 abund_ds <- function(fit, flatfile) {
   e <- as.data.frame(dht2(fit, flatfile = flatfile, strat_formula = ~Region.Label,
                           er_est = "P2", sample_fraction = fov / 360))
@@ -85,7 +81,7 @@ abund_ds <- function(fit, flatfile) {
 }
 
 ##---------------------------------------
-## One replicate: survey both subpopulations, analyse jointly
+## One replicate: survey both sub-populations, analyse jointly
 ##---------------------------------------
 generate_survey <- function() {
 
@@ -180,23 +176,15 @@ sim_once <- function() {
 
   out <- list()
 
-  ## ---- CTDS: one pooled key selected by AIC ------------------------------
+  ## ---- CTDS ------------------------------
   fit <- quiet_ds(select_best_ds(fd, w = w))
   if (!is.null(fit)) {
     out$ctds <- abund_ds(fit, flat) |>
       mutate(model = "CTDS", key = fit$ddf$name.message)
   }
 
-  ## ---- MCDS: subpopulation as a covariate on the scale -------------------
-  ## Key function selected by AIC, as for model CTDS, but without adjustment
-  ## terms. ds() turns the monotonicity constraint off whenever the detection
-  ## function has covariates (monotonicity = ifelse(formula == ~1, "strict",
-  ## "none")) and refuses to turn it back on, so a covariate model carrying
-  ## cosine adjustments can be non-monotonic or exceed one and cannot be
-  ## constrained. The CTDS candidate set has no covariates and so keeps its
-  ## adjustment terms under a strict monotonicity constraint.
-  ## A uniform key has no scale parameter for a covariate to act on and so
-  ## cannot be included either.
+  ## ---- MCDS -----------------------------
+
   cand <- list(); cand_nm <- character(0)
   for (ky in c("hn", "hr")) {
     m <- quiet_ds(ds(fd, transect = "point", key = ky, formula = ~Region.Label,
@@ -213,7 +201,7 @@ sim_once <- function() {
       mutate(model = "MCDS", key = cand_nm[j])
   }
 
-  ## ---- Closest: pooled sigma, availability adjusted by group size --------
+  ## ---- Closest --------------------------
   try({
     ok  <- !is.na(clos$rmin)
     fit <- fit_detection_hn(clos$rmin[ok], w = w, gs = clos$count[ok])
@@ -225,11 +213,8 @@ sim_once <- function() {
     })) |> mutate(model = "Closest", key = "half-normal", sigma = fit$sigma)
   }, silent = TRUE)
 
-  ## ---- Time lapse: pooled sigma, standard availability -------------------
-  ## estimate_density_ctds() is the manuscript's own design-based estimator and
-  ## adds the detection-function variance (delta method) to the empirical
-  ## encounter-rate variance, so the interval is built the same way as for the
-  ## other models. Counts are per camera and include cameras that saw nothing.
+  ## ---- Time lapse -----------------------
+
   try({
     fit <- fit_detection_hn(ld$distance, w = w, gs = 1)
     out$lapse <- list_rbind(lapply(subpops, function(s) {
@@ -257,8 +242,9 @@ sim_once <- function() {
 }
 
 ##---------------------------------------
-## Replicate 2,000 times
+## Replicate sims
 ##---------------------------------------
+
 set.seed(2026)
 
 res <- vector("list", n_rep)
@@ -285,49 +271,24 @@ res <- readRDS("outputs/res_subpopulation.rds")
 ##---------------------------------------
 ## Summaries
 ##---------------------------------------
-cat("\n===== true abundance of each subpopulation:", N_true, "=====\n")
+cat("\n true abundance of each subpopulation:", N_true, "\n")
 
-cat("\n===== group-size composition and sample size =====\n")
-res |>
-  summarise(mean_group_size = round(mean(mean_gs), 2),
-            detections      = round(mean(n_det)), .by = subpop) |>
-  as.data.frame() |> print()
-
-cat("\n===== estimated abundance by subpopulation =====\n")
-cat("mean_bias is the primary summary; median_bias is shown for comparison\n")
 res |>
   summarise(reps        = n(),
             N_mean      = round(mean(N)),
-            N_median    = round(median(N)),
-            p10         = round(quantile(N, 0.1)),   # spread of N-hat across
-            p90         = round(quantile(N, 0.9)),   # reps, NOT a confidence interval
             mean_bias   = round(mean(rel_bias), 3),
-            median_bias = round(median(rel_bias), 3),
             cv          = round(sd(N) / mean(N), 3),
-            skew        = round(mean((N - mean(N))^3) / sd(N)^3, 2),
             coverage    = round(mean(cover, na.rm = TRUE), 2),
             .by = c(model, subpop)) |>
   arrange(model, subpop) |> as.data.frame() |> print()
 
-cat("\n===== ratio of the two subpopulations (truth = 1) =====\n")
-res |>
-  select(model, rep, subpop, N) |>
-  pivot_wider(names_from = subpop, values_from = N) |>
-  mutate(ratio = Clustered / Uniform) |>
-  summarise(reps         = sum(!is.na(ratio)),
-            ratio_mean   = round(mean(ratio, na.rm = TRUE), 3),
-            ratio_median = round(median(ratio, na.rm = TRUE), 3),
-            lcl          = round(quantile(ratio, 0.1, na.rm = TRUE), 3),
-            ucl          = round(quantile(ratio, 0.9, na.rm = TRUE), 3),
-            .by = model) |>
-  arrange(model) |> as.data.frame() |> print()
 
-cat("\n===== fitted scale parameter (true sensor sigma =", sigma_closest, ") =====\n")
+cat("\n Fitted scale parameters \n")
 res |> filter(!is.na(sigma)) |>
   summarise(sigma = round(median(sigma), 2), .by = model) |>
   as.data.frame() |> print()
 
-cat("\n===== key function selected =====\n")
+cat("\n key function selected \n")
 res |> filter(model %in% c("CTDS", "MCDS")) |>
   count(model, key) |> arrange(model, desc(n)) |> as.data.frame() |> print()
 
@@ -340,19 +301,8 @@ theme_ms <- theme_bw() +
         axis.text  = element_text(size = 10),
         strip.text = element_text(face = "bold", size = 11))
 
-## estimated abundance against the truth
-p_abund <- ggplot(res, aes(subpop, N, fill = model)) +
-  geom_boxplot(outlier.size = 0.5, outliers = FALSE) +
-  geom_hline(yintercept = N_true, linetype = "dashed", linewidth = 0.7) +
-  facet_wrap(~model, nrow = 1) +
-  labs(x = NULL, y = expression(bold("Estimated abundance " * hat(N)))) +
-  theme_ms
-# ggsave("outputs/subpop_abundance.png", p_abund, width = 10, height = 5, dpi = 300)
+## relative bias
 
-## relative bias, in the style of existing Figure 3
-## relative bias for each subpopulation and for the two pooled. Pooling
-## robustness protects the total, not the parts, so the third box is the
-## one that should sit on zero even when the first two do not.
 bias_dat <- bind_rows(
   res |> select(model, rep, subpop, rel_bias),
   res |> summarise(N = sum(N), k = n(), .by = c(model, rep)) |>
@@ -363,7 +313,7 @@ bias_dat <- bind_rows(
   mutate(subpop = factor(subpop, levels = c(subpops, "Total (pooled)"),
                          labels = c("A (uniform)","B (clustered)","Total (pooled)")))
 
-bias_dat |> summarise(bias = median(rel_bias), .by = c(model,subpop))
+bias_dat |> summarise(bias = mean(rel_bias), .by = c(model,subpop))
 
 
 p_bias <- ggplot(bias_dat, aes(subpop, rel_bias, fill = subpop)) +
@@ -375,14 +325,6 @@ p_bias <- ggplot(bias_dat, aes(subpop, rel_bias, fill = subpop)) +
   scale_fill_manual(values = c("grey75", "grey45", "steelblue")) +
   labs(x = NULL, y = expression(bold("Relative bias of " * hat(N)))) +
   theme_ms + theme(axis.text.x = element_text(angle = 25, hjust = 1))
-ggsave("outputs/subpop_rel_bias.png", p_bias, width = 12, height = 5.2, dpi = 300)
 
-cat("\n===== relative bias: subpopulations and the pooled total =====\n")
-print(as.data.frame(bias_dat |>
-  summarise(mean_bias = round(mean(rel_bias), 3),
-            median_bias = round(median(rel_bias), 3), .by = c(model, subpop)) |>
-  pivot_wider(names_from = subpop, values_from = c(mean_bias, median_bias)) |>
-  arrange(model)))
+p_bias
 
-
-print(p_abund); print(p_bias)
