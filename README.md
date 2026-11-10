@@ -12,6 +12,8 @@ detection of multiple individuals in camera traps for use in camera trap
 distance sampling (CTDS) applications. *Methods in Ecology and
 Evolution* (in press).
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24097386.svg)](https://doi.org/10.5281/zenodo.24097386)
+
 - This repository contains `R` code and functions to conduct the
   simulations documented in the manuscript comparing the performance of
   the standard CTDS approach with the new method based on recording only
